@@ -1,0 +1,15 @@
+{
+  "name": "SHAMAN PRODUCTION — Envoi SMS, E-mail & Médias",
+  "short_name": "Shaman Production",
+  "description": "Préparez des envois groupés de SMS, e-mails, et médias vers WhatsApp, par lots.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#D3EAF7",
+  "theme_color": "#D3EAF7",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

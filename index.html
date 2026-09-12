@@ -1,0 +1,2363 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SHAMAN PRODUCTION — Envoi SMS, E-mail & Médias</title>
+<meta name="theme-color" content="#D3EAF7">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.png" type="image/png">
+<link rel="apple-touch-icon" href="icon.png">
+<style>
+  :root{
+    --bg:#D3EAF7; --panel:#F3FAFF; --line:#B8DCEC;
+    --signal:#F0528C; --signal-dim:#FAC3D9; --sky:#2496C7; --sky-dim:#CBE9F5;
+    --amber:#F0603D;
+    --text:#0F2436; --text-dim:#43647F; --danger:#C93C52;
+    --radius:14px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background: radial-gradient(1100px 560px at 15% -10%, #F6C7DC 0%, transparent 55%),
+                radial-gradient(1100px 560px at 100% 0%, #B9E1F2 0%, transparent 55%),
+                var(--bg);
+    color:var(--text); font-family:'Segoe UI', system-ui, -apple-system, sans-serif;
+    min-height:100vh; -webkit-font-smoothing:antialiased; padding-bottom:90px;
+  }
+  .wrap{max-width:560px;margin:0 auto;padding:20px 16px 8px;}
+
+  header{display:flex;align-items:center;gap:14px;margin-bottom:18px;}
+  .avatar{
+    width:56px;height:56px;border-radius:50%;object-fit:cover;
+    border:2px solid var(--signal); cursor:pointer; flex-shrink:0;
+    box-shadow:0 2px 10px rgba(255,111,160,.35);
+  }
+  .brand{line-height:1.15;flex:1;min-width:0;}
+  .brand .eyebrow{font-size:10.5px;letter-spacing:.12em;color:var(--sky);text-transform:uppercase;font-weight:700;}
+  .brand h1{font-size:17px;margin:2px 0 0;font-weight:700;letter-spacing:.01em;color:var(--text);}
+
+  #fullscreenOverlay{
+    display:none; position:fixed; inset:0; background:rgba(10,20,40,.92);
+    z-index:999; align-items:center; justify-content:center; cursor:pointer;
+  }
+  #fullscreenOverlay img{max-width:88vw;max-height:88vh;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.5);}
+
+  nav.tabs{
+    display:flex; gap:6px; background:var(--panel); border:1px solid var(--line);
+    border-radius:12px; padding:5px; margin-bottom:18px; overflow-x:auto;
+    box-shadow:0 2px 12px rgba(63,182,234,.08);
+  }
+  nav.tabs button{
+    flex:1; white-space:nowrap; background:transparent; border:none; color:var(--text-dim);
+    font-weight:600; font-size:13px; padding:10px 8px; border-radius:9px; cursor:pointer;
+  }
+  nav.tabs button.active{background:linear-gradient(135deg, var(--signal), var(--sky)); color:#FFFFFF;}
+
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:18px; margin-bottom:14px;
+    box-shadow:0 2px 14px rgba(63,182,234,.07);}
+  .card h2{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--sky);margin:0 0 12px;font-weight:700;}
+  .card p.dim{color:var(--text-dim);font-size:13.5px;line-height:1.5;margin:0 0 10px;}
+
+  label{display:block;font-size:12.5px;color:var(--text-dim);margin:10px 0 5px;font-weight:600;}
+  input[type=text], input[type=tel], input[type=email], textarea, select, input[type=number]{
+    width:100%; background:#E8F4FA; border:1px solid var(--line); color:var(--text);
+    font-size:15px; border-radius:10px; padding:11px 12px; font-family:inherit;
+  }
+  input:focus, textarea:focus, select:focus{outline:2px solid var(--signal); outline-offset:1px;}
+  textarea{resize:vertical; min-height:110px;}
+
+  button.btn{
+    font-family:inherit; border:none; cursor:pointer; border-radius:11px; font-weight:700;
+    font-size:14.5px; padding:13px 16px; transition:transform .1s ease;
+  }
+  button.btn:active{transform:scale(.98);}
+  .btn-primary{background:linear-gradient(135deg, var(--signal), #FF9BC0); color:#FFFFFF; width:100%;
+    box-shadow:0 4px 14px rgba(255,111,160,.35);}
+  .btn-secondary{background:var(--sky-dim);border:1px solid var(--line);color:var(--sky);}
+  .btn-danger{background:transparent;border:1px solid var(--danger);color:var(--danger);}
+  .btn-small{padding:8px 12px;font-size:13px;border-radius:9px;}
+  .row{display:flex;gap:8px;}
+  .row > *{flex:1;}
+
+  .hint{background:var(--sky-dim);border:1px solid #BEE6F7;color:#0E6E96;border-radius:10px;padding:11px 13px;font-size:12.5px;line-height:1.5;margin-bottom:14px;}
+
+  .list-item{
+    display:flex;align-items:center;justify-content:space-between;gap:10px;
+    padding:10px 0;border-bottom:1px solid var(--line);
+  }
+  .list-item:last-child{border-bottom:none;}
+  .list-item .info{min-width:0;}
+  .list-item .info .name{font-weight:600;font-size:14.5px;color:var(--text);}
+  .list-item .info .meta{font-size:12.5px;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+
+  .group-item{padding:12px 0;border-bottom:1px solid var(--line);}
+  .group-item:last-child{border-bottom:none;}
+  .group-item .name{font-weight:700;font-size:15.5px;color:var(--text);line-height:1.3;}
+  .group-item .meta{font-size:12.5px;color:var(--text-dim);margin-top:2px;}
+  .base-progress{height:6px;border-radius:4px;background:var(--line);margin-top:6px;overflow:hidden;}
+  .base-progress-fill{height:100%;background:var(--signal);border-radius:4px;transition:width .2s ease;}
+  .chip{display:inline-block;background:var(--signal-dim);border:1px solid #FFC2D9;color:#C43E71;
+    font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;margin:2px 4px 2px 0;}
+
+  .check-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);}
+  .check-row:last-child{border-bottom:none;}
+  .check-row input[type=checkbox]{width:18px;height:18px;flex-shrink:0;accent-color:var(--signal);}
+  .check-row label{margin:0;color:var(--text);font-weight:500;font-size:14.5px;flex:1;}
+
+  .counter{font-size:12px;color:var(--text-dim);text-align:right;margin-top:4px;}
+  .counter.warn{color:var(--amber);}
+
+  .batch{border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:10px;background:var(--sky-dim);}
+  .batch .batch-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;}
+  .batch .batch-head .label{font-weight:700;font-size:13.5px;color:var(--text);}
+  .batch .batch-head .count{font-size:12px;color:var(--text-dim);}
+  .batch.done{opacity:.55;}
+  .batch .sent-badge{color:#C43E71;font-size:12.5px;font-weight:700;}
+
+  .media-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0;}
+  .media-thumb{position:relative;border-radius:10px;overflow:hidden;aspect-ratio:1/1;background:var(--sky-dim);border:1px solid var(--line);}
+  .media-thumb img, .media-thumb video{width:100%;height:100%;object-fit:cover;}
+  .media-thumb .rm{position:absolute;top:4px;right:4px;background:rgba(20,30,50,.6);color:#fff;border:none;
+    border-radius:50%;width:22px;height:22px;font-size:13px;cursor:pointer;line-height:1;}
+
+  .empty{color:var(--text-dim);font-size:13.5px;text-align:center;padding:16px 0;}
+
+  .tabpanel{display:none;}
+  .tabpanel.active{display:block;}
+
+  footer{text-align:center;color:var(--text-dim);font-size:11.5px;padding:18px 0 4px;}
+
+  /* ============ Version ordinateur (écran large) ============
+     Sur mobile, tout reste inchangé (une seule colonne, comme avant).
+     À partir de 900px de large, on profite de l'espace : colonne plus
+     large, onglets sur une seule ligne, et les cartes d'un même onglet
+     se répartissent sur deux colonnes façon "mur de cartes". */
+  @media (min-width: 900px){
+    .wrap{max-width:1180px;padding:28px 24px 8px;}
+    header{margin-bottom:26px;}
+    nav.tabs{overflow-x:visible;flex-wrap:wrap;padding:6px;}
+    nav.tabs button{flex:0 1 auto;padding:11px 20px;font-size:13.5px;}
+    button.btn{cursor:pointer;}
+    button.btn:hover{filter:brightness(1.05);}
+    .tabpanel.active{column-count:2;column-gap:20px;}
+    .card, .hint, .batch{break-inside:avoid-column;}
+    input[type=text], input[type=tel], input[type=email], textarea, select, input[type=number]{
+      font-size:14.5px;
+    }
+  }
+  @media (min-width: 1300px){
+    .tabpanel.active{column-count:3;}
+  }
+
+</style>
+</head>
+<body>
+
+<div id="fullscreenOverlay"><img id="fullscreenImg" src="avatar.png" alt=""></div>
+
+<div id="openInBrowserBanner" style="display:none;background:#F0603D;color:#fff;padding:12px 16px;font-size:13.5px;text-align:center;position:sticky;top:0;z-index:999;"></div>
+
+<div class="wrap">
+  <header>
+    <img class="avatar" id="avatarBtn" src="avatar.png" alt="Photo de profil">
+    <div class="brand">
+      <div class="eyebrow">Shaman Production</div>
+      <h1>Envoi SMS, E-mail, Médias</h1>
+    </div>
+    <button class="btn btn-secondary btn-small" id="checkUpdateBtn" style="flex:0 0 auto;align-self:center;">🔄 Mises à jour</button>
+  </header>
+
+  <div class="card" id="installShareCard" style="margin-bottom:14px;">
+    <h2>📲 Installer & Partager l'application</h2>
+    <div class="row" style="gap:8px;flex-wrap:wrap;">
+      <button class="btn btn-primary" id="installAppBtn">📲 Installer sur cet appareil</button>
+      <button class="btn btn-secondary" id="nativeShareBtn" style="display:none;">📤 Partager avec des collègues</button>
+      <button class="btn btn-secondary" id="copyAppLinkBtn">🔗 Copier le lien</button>
+    </div>
+    <div style="height:10px"></div>
+    <div id="appQrWrap" style="text-align:center;">
+      <img id="appQrImg" alt="QR code de l'application" style="width:180px;height:180px;border-radius:10px;background:#fff;padding:8px;display:none;">
+      <p class="dim" id="appQrFallback" style="font-size:12px;display:none;">Le QR code nécessite une connexion internet pour s'afficher — le lien fonctionne quand même hors connexion une fois l'app ouverte une première fois.</p>
+    </div>
+    <p class="dim" style="margin:8px 0 0;font-size:12px;">Vos collègues peuvent scanner ce code ou ouvrir le lien, puis appuyer sur « Installer sur cet appareil » pour l'ajouter à leur écran d'accueil.</p>
+  </div>
+
+  <div class="card" id="syncCard" style="margin-bottom:14px;">
+    <h2>☁️ Synchronisation multi-téléphones</h2>
+    <label>Code d'espace de travail (le même sur tous vos téléphones)</label>
+    <input type="text" id="syncCode" placeholder="Ex. shaman2026">
+    <div style="height:10px"></div>
+    <div class="row">
+      <button class="btn btn-primary" id="syncPushBtn">🔄 Synchroniser maintenant</button>
+    </div>
+    <div style="height:10px"></div>
+    <label style="display:flex;align-items:center;gap:8px;font-weight:600;">
+      <input type="checkbox" id="syncAutoToggle" style="width:auto;">
+      Synchronisation automatique dès qu'il y a internet (activée par défaut)
+    </label>
+    <p class="dim" style="margin:8px 0 0;font-size:12px;">Chaque synchronisation fusionne les données : un contact ou une base créés sur un téléphone ne sont jamais effacés par un autre. Fonctionne aussi hors connexion (l'app reste utilisable normalement) — la synchro se fait toute seule dès que la connexion revient.</p>
+    <div class="dim" id="syncStatus" style="margin-top:8px;font-size:12.5px;"></div>
+    <div style="margin-top:8px;"><a href="#" id="syncForget" style="font-size:12px;color:var(--text-dim);">Oublier ce code sur cet appareil</a></div>
+  </div>
+
+  <nav class="tabs">
+    <button class="tab-btn active" data-tab="contacts">Contacts</button>
+    <button class="tab-btn" data-tab="sms">SMS</button>
+    <button class="tab-btn" data-tab="bases">Bases SMS</button>
+    <button class="tab-btn" data-tab="email">E-mail</button>
+    <button class="tab-btn" data-tab="media">Médias · WhatsApp</button>
+    <button class="tab-btn" data-tab="scheduled">Programmés</button>
+    <button class="tab-btn" data-tab="blocked">🚫 Bloqués</button>
+  </nav>
+
+  <!-- ===================== CONTACTS ===================== -->
+  <div class="tabpanel active" id="tab-contacts">
+    <div class="card">
+      <h2>Appeler un numéro</h2>
+      <div class="row">
+        <input type="tel" inputmode="tel" id="quickCallNumber" placeholder="Ex. +2250748935686">
+        <a class="btn btn-primary" id="quickCallBtn" style="flex:0 0 auto;text-decoration:none;text-align:center;" href="tel:">📞 Appeler</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Ajouter un contact</h2>
+      <label>Nom</label>
+      <input type="text" id="cName" placeholder="Ex. Koffi Jean">
+      <label>Téléphone</label>
+      <div class="row">
+        <select id="cCountry" style="flex:0 0 44%;">
+      <option value="225">Côte d&#39;Ivoire (+225)</option>
+      <option value="93">Afghanistan (+93)</option>
+      <option value="27">Afrique du Sud (+27)</option>
+      <option value="355">Albanie (+355)</option>
+      <option value="213">Algérie (+213)</option>
+      <option value="49">Allemagne (+49)</option>
+      <option value="376">Andorre (+376)</option>
+      <option value="244">Angola (+244)</option>
+      <option value="1268">Antigua-et-Barbuda (+1268)</option>
+      <option value="966">Arabie saoudite (+966)</option>
+      <option value="54">Argentine (+54)</option>
+      <option value="374">Arménie (+374)</option>
+      <option value="61">Australie (+61)</option>
+      <option value="43">Autriche (+43)</option>
+      <option value="994">Azerbaïdjan (+994)</option>
+      <option value="1242">Bahamas (+1242)</option>
+      <option value="973">Bahreïn (+973)</option>
+      <option value="880">Bangladesh (+880)</option>
+      <option value="1246">Barbade (+1246)</option>
+      <option value="32">Belgique (+32)</option>
+      <option value="501">Belize (+501)</option>
+      <option value="975">Bhoutan (+975)</option>
+      <option value="95">Birmanie (Myanmar) (+95)</option>
+      <option value="375">Biélorussie (+375)</option>
+      <option value="591">Bolivie (+591)</option>
+      <option value="387">Bosnie-Herzégovine (+387)</option>
+      <option value="267">Botswana (+267)</option>
+      <option value="673">Brunei (+673)</option>
+      <option value="55">Brésil (+55)</option>
+      <option value="359">Bulgarie (+359)</option>
+      <option value="226">Burkina Faso (+226)</option>
+      <option value="257">Burundi (+257)</option>
+      <option value="229">Bénin (+229)</option>
+      <option value="855">Cambodge (+855)</option>
+      <option value="237">Cameroun (+237)</option>
+      <option value="1">Canada (+1)</option>
+      <option value="238">Cap-Vert (+238)</option>
+      <option value="236">Centrafrique (+236)</option>
+      <option value="56">Chili (+56)</option>
+      <option value="86">Chine (+86)</option>
+      <option value="357">Chypre (+357)</option>
+      <option value="57">Colombie (+57)</option>
+      <option value="269">Comores (+269)</option>
+      <option value="242">Congo-Brazzaville (+242)</option>
+      <option value="243">Congo-Kinshasa (RDC) (+243)</option>
+      <option value="850">Corée du Nord (+850)</option>
+      <option value="82">Corée du Sud (+82)</option>
+      <option value="506">Costa Rica (+506)</option>
+      <option value="385">Croatie (+385)</option>
+      <option value="53">Cuba (+53)</option>
+      <option value="45">Danemark (+45)</option>
+      <option value="253">Djibouti (+253)</option>
+      <option value="1767">Dominique (+1767)</option>
+      <option value="34">Espagne (+34)</option>
+      <option value="372">Estonie (+372)</option>
+      <option value="268">Eswatini (+268)</option>
+      <option value="679">Fidji (+679)</option>
+      <option value="358">Finlande (+358)</option>
+      <option value="33">France (+33)</option>
+      <option value="241">Gabon (+241)</option>
+      <option value="220">Gambie (+220)</option>
+      <option value="233">Ghana (+233)</option>
+      <option value="1473">Grenade (+1473)</option>
+      <option value="30">Grèce (+30)</option>
+      <option value="502">Guatemala (+502)</option>
+      <option value="224">Guinée (+224)</option>
+      <option value="240">Guinée équatoriale (+240)</option>
+      <option value="245">Guinée-Bissau (+245)</option>
+      <option value="592">Guyana (+592)</option>
+      <option value="995">Géorgie (+995)</option>
+      <option value="509">Haïti (+509)</option>
+      <option value="504">Honduras (+504)</option>
+      <option value="36">Hongrie (+36)</option>
+      <option value="91">Inde (+91)</option>
+      <option value="62">Indonésie (+62)</option>
+      <option value="964">Irak (+964)</option>
+      <option value="98">Iran (+98)</option>
+      <option value="353">Irlande (+353)</option>
+      <option value="354">Islande (+354)</option>
+      <option value="972">Israël (+972)</option>
+      <option value="39">Italie (+39)</option>
+      <option value="1876">Jamaïque (+1876)</option>
+      <option value="81">Japon (+81)</option>
+      <option value="962">Jordanie (+962)</option>
+      <option value="7">Kazakhstan (+7)</option>
+      <option value="254">Kenya (+254)</option>
+      <option value="996">Kirghizistan (+996)</option>
+      <option value="686">Kiribati (+686)</option>
+      <option value="965">Koweït (+965)</option>
+      <option value="856">Laos (+856)</option>
+      <option value="266">Lesotho (+266)</option>
+      <option value="371">Lettonie (+371)</option>
+      <option value="961">Liban (+961)</option>
+      <option value="231">Liberia (+231)</option>
+      <option value="218">Libye (+218)</option>
+      <option value="423">Liechtenstein (+423)</option>
+      <option value="370">Lituanie (+370)</option>
+      <option value="352">Luxembourg (+352)</option>
+      <option value="389">Macédoine du Nord (+389)</option>
+      <option value="261">Madagascar (+261)</option>
+      <option value="60">Malaisie (+60)</option>
+      <option value="265">Malawi (+265)</option>
+      <option value="960">Maldives (+960)</option>
+      <option value="223">Mali (+223)</option>
+      <option value="356">Malte (+356)</option>
+      <option value="212">Maroc (+212)</option>
+      <option value="230">Maurice (+230)</option>
+      <option value="222">Mauritanie (+222)</option>
+      <option value="52">Mexique (+52)</option>
+      <option value="691">Micronésie (+691)</option>
+      <option value="373">Moldavie (+373)</option>
+      <option value="377">Monaco (+377)</option>
+      <option value="976">Mongolie (+976)</option>
+      <option value="382">Monténégro (+382)</option>
+      <option value="258">Mozambique (+258)</option>
+      <option value="264">Namibie (+264)</option>
+      <option value="674">Nauru (+674)</option>
+      <option value="505">Nicaragua (+505)</option>
+      <option value="227">Niger (+227)</option>
+      <option value="234">Nigeria (+234)</option>
+      <option value="47">Norvège (+47)</option>
+      <option value="64">Nouvelle-Zélande (+64)</option>
+      <option value="977">Népal (+977)</option>
+      <option value="968">Oman (+968)</option>
+      <option value="256">Ouganda (+256)</option>
+      <option value="998">Ouzbékistan (+998)</option>
+      <option value="92">Pakistan (+92)</option>
+      <option value="680">Palaos (+680)</option>
+      <option value="970">Palestine (+970)</option>
+      <option value="507">Panama (+507)</option>
+      <option value="675">Papouasie-Nouvelle-Guinée (+675)</option>
+      <option value="595">Paraguay (+595)</option>
+      <option value="31">Pays-Bas (+31)</option>
+      <option value="63">Philippines (+63)</option>
+      <option value="48">Pologne (+48)</option>
+      <option value="351">Portugal (+351)</option>
+      <option value="51">Pérou (+51)</option>
+      <option value="974">Qatar (+974)</option>
+      <option value="40">Roumanie (+40)</option>
+      <option value="44">Royaume-Uni (+44)</option>
+      <option value="7">Russie (+7)</option>
+      <option value="250">Rwanda (+250)</option>
+      <option value="1809">République dominicaine (+1809)</option>
+      <option value="420">République tchèque (+420)</option>
+      <option value="1869">Saint-Kitts-et-Nevis (+1869)</option>
+      <option value="378">Saint-Marin (+378)</option>
+      <option value="1784">Saint-Vincent-et-les-Grenadines (+1784)</option>
+      <option value="1758">Sainte-Lucie (+1758)</option>
+      <option value="677">Salomon (+677)</option>
+      <option value="503">Salvador (+503)</option>
+      <option value="685">Samoa (+685)</option>
+      <option value="239">Sao Tomé-et-Principe (+239)</option>
+      <option value="381">Serbie (+381)</option>
+      <option value="248">Seychelles (+248)</option>
+      <option value="232">Sierra Leone (+232)</option>
+      <option value="65">Singapour (+65)</option>
+      <option value="421">Slovaquie (+421)</option>
+      <option value="386">Slovénie (+386)</option>
+      <option value="252">Somalie (+252)</option>
+      <option value="249">Soudan (+249)</option>
+      <option value="211">Soudan du Sud (+211)</option>
+      <option value="94">Sri Lanka (+94)</option>
+      <option value="41">Suisse (+41)</option>
+      <option value="597">Suriname (+597)</option>
+      <option value="46">Suède (+46)</option>
+      <option value="963">Syrie (+963)</option>
+      <option value="221">Sénégal (+221)</option>
+      <option value="992">Tadjikistan (+992)</option>
+      <option value="255">Tanzanie (+255)</option>
+      <option value="235">Tchad (+235)</option>
+      <option value="66">Thaïlande (+66)</option>
+      <option value="670">Timor oriental (+670)</option>
+      <option value="228">Togo (+228)</option>
+      <option value="676">Tonga (+676)</option>
+      <option value="1868">Trinité-et-Tobago (+1868)</option>
+      <option value="216">Tunisie (+216)</option>
+      <option value="993">Turkménistan (+993)</option>
+      <option value="90">Turquie (+90)</option>
+      <option value="688">Tuvalu (+688)</option>
+      <option value="380">Ukraine (+380)</option>
+      <option value="598">Uruguay (+598)</option>
+      <option value="678">Vanuatu (+678)</option>
+      <option value="379">Vatican (+379)</option>
+      <option value="58">Venezuela (+58)</option>
+      <option value="84">Vietnam (+84)</option>
+      <option value="967">Yémen (+967)</option>
+      <option value="260">Zambie (+260)</option>
+      <option value="263">Zimbabwe (+263)</option>
+      <option value="20">Égypte (+20)</option>
+      <option value="971">Émirats arabes unis (+971)</option>
+      <option value="593">Équateur (+593)</option>
+      <option value="291">Érythrée (+291)</option>
+      <option value="1">États-Unis (+1)</option>
+      <option value="251">Éthiopie (+251)</option>
+      <option value="692">Îles Marshall (+692)</option>
+        </select>
+        <input type="tel" inputmode="tel" id="cPhone" placeholder="Ex. 0748935686 (avec le 0, 10 chiffres)">
+      </div>
+      <p class="dim" id="cPhoneHint" style="margin:6px 0 0;font-size:12px;">Numéro ivoirien : entrez les 10 chiffres avec le 0 (ex. 0748935686) — l'indicatif +225 est ajouté automatiquement.</p>
+      <label>E-mail (optionnel)</label>
+      <input type="email" id="cEmail" placeholder="Ex. koffi@email.com">
+      <label>Groupe (optionnel)</label>
+      <select id="cGroup"><option value="">— Aucun —</option></select>
+      <div style="height:12px"></div>
+      <button class="btn btn-primary" id="addContactBtn">Ajouter le contact</button>
+      <button class="btn btn-secondary" id="cancelEditBtn" style="display:none;margin-top:8px;">Annuler la modification</button>
+    </div>
+
+    <div class="card">
+      <h2>Créer un groupe</h2>
+      <div class="row">
+        <input type="text" id="gName" placeholder="Ex. Clients VIP">
+        <button class="btn btn-secondary" id="addGroupBtn" style="flex:0 0 auto;">Créer</button>
+      </div>
+      <div id="groupChips" style="margin-top:10px;"></div>
+    </div>
+
+    <div class="card">
+      <h2>Vos contacts (<span id="contactCount">0</span>)</h2>
+      <input type="text" id="contactSearch" placeholder="Rechercher un contact…" style="margin-bottom:10px;">
+      <div id="contactList"><div class="empty">Aucun contact pour l'instant.</div></div>
+    </div>
+
+    <div class="card">
+      <h2>Sauvegarde</h2>
+      <p class="dim">Vos contacts et groupes restent sur cet appareil. Exportez-les pour les garder en sécurité ou les retrouver sur un autre téléphone.</p>
+      <div class="row">
+        <button class="btn btn-secondary" id="exportBtn">Exporter (.json)</button>
+        <label class="btn btn-secondary" style="text-align:center;">
+          Importer
+          <input type="file" id="importFile" accept=".json" style="display:none;">
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== SMS ===================== -->
+  <div class="tabpanel" id="tab-sms">
+    <div class="hint">
+      L'envoi se fait via l'application SMS déjà installée sur votre téléphone (et votre forfait SMS actuel) — l'app prépare le message et les numéros, mais c'est vous qui appuyez sur « Envoyer » à chaque lot, comme l'exige Android/iOS pour éviter le spam.
+    </div>
+    <div class="card">
+      <h2>Message</h2>
+      <textarea id="smsBody" placeholder="Votre message…"></textarea>
+      <div class="counter" id="smsCounter">0 caractère · 1 SMS</div>
+    </div>
+    <div class="card">
+      <h2>Numéro expéditeur (mémo)</h2>
+      <p class="dim">Comme votre téléphone a deux puces, choisissez ici quel numéro doit servir — l'app l'affichera sur chaque lot pour vous le rappeler. C'est vous qui sélectionnez la bonne SIM sur l'écran d'envoi de votre téléphone (ou réglez votre SIM par défaut pour les SMS dans les paramètres).</p>
+      <select id="smsSenderNumber">
+        <option value="07 49 97 09 18">07 49 97 09 18</option>
+        <option value="07 48 93 56 86" selected>07 48 93 56 86</option>
+        <option value="__other__">Autre numéro…</option>
+      </select>
+      <input type="tel" inputmode="tel" id="smsSenderOther" placeholder="Numéro" style="display:none;margin-top:8px;">
+    </div>
+    <div class="card">
+      <h2>Destinataires</h2>
+      <div id="smsRecipientPicker"></div>
+    </div>
+    <div class="card">
+      <h2>Taille des lots</h2>
+      <p class="dim">Un « lot » = un envoi à préparer. L'app n'impose aucune limite, mais l'application SMS de votre téléphone, elle, en a une : au-delà d'une dizaine à une vingtaine de numéros dans un même envoi groupé, certains téléphones refusent ou tronquent le message. 15 par défaut est un bon compromis — testez plus haut si le vôtre l'accepte.</p>
+      <input type="number" id="smsBatchSize" value="15" min="1">
+      <div style="height:12px"></div>
+      <button class="btn btn-primary" id="buildSmsBatches">Préparer les envois</button>
+    </div>
+    <div class="hint">Après avoir appuyé sur « Ouvrir SMS », vérifiez le champ destinataire de votre appli SMS. Si les numéros n'apparaissent pas correctement (courant sur certains Samsung/Tecno/Infinix), utilisez le bouton « Autre format » ou copiez les numéros et collez-les vous-même.</div>
+    <div class="hint">⚠️ Si l'envoi à plusieurs numéros à la fois échoue ou ne part pas : la plupart des applis SMS Android transforment un envoi à plusieurs destinataires en « message de groupe » (MMS), qui a besoin d'internet/données mobiles actives et peut échouer selon le réseau. Solution fiable : dans les réglages de votre appli SMS (souvent Réglages → Options avancées → « Messagerie de groupe »), choisissez « Envoyer les SMS individuellement ». Vous pouvez aussi mettre la taille du lot à 1 pour envoyer numéro par numéro, en SMS classique garanti.</div>
+    <div id="smsBatches"></div>
+  </div>
+
+  <!-- ===================== EMAIL ===================== -->
+  <div class="tabpanel" id="tab-email">
+    <div class="hint">
+      Un e-mail peut avoir de nombreux destinataires en copie cachée (CCI) dans un seul envoi — c'est le seul des trois volets où un vrai envoi groupé en un clic est possible. Votre appli e-mail s'ouvre déjà remplie ; il ne reste qu'à appuyer sur Envoyer.
+    </div>
+    <div class="card">
+      <h2>Message</h2>
+      <label>Objet</label>
+      <input type="text" id="mailSubject" placeholder="Objet de l'e-mail">
+      <label>Corps du message</label>
+      <textarea id="mailBody" placeholder="Votre message…" style="min-height:150px;"></textarea>
+    </div>
+    <div class="card">
+      <h2>Destinataires</h2>
+      <p class="dim">Seuls les contacts avec une adresse e-mail enregistrée apparaissent ici.</p>
+      <div id="mailRecipientPicker"></div>
+    </div>
+    <div class="card">
+      <h2>Taille des lots</h2>
+      <p class="dim">Pas de limite imposée par l'app. Beaucoup de messageries plafonnent toutefois un envoi autour de 50 à 100 destinataires — 40 par défaut reste prudent.</p>
+      <input type="number" id="mailBatchSize" value="40" min="1">
+      <div style="height:12px"></div>
+      <button class="btn btn-primary" id="buildMailBatches">Préparer les envois</button>
+    </div>
+    <div id="mailBatches"></div>
+  </div>
+
+  <!-- ===================== MEDIA / WHATSAPP ===================== -->
+  <div class="tabpanel" id="tab-media">
+    <div class="hint">
+      Après avoir appuyé sur « Partager via WhatsApp », c'est WhatsApp qui vous permettra de cocher plusieurs contacts ou groupes pour l'envoi groupé — exactement comme un partage depuis votre galerie.
+    </div>
+    <div class="card">
+      <h2>Choisir des fichiers</h2>
+      <div class="row">
+        <label class="btn btn-secondary" style="text-align:center;">
+          Galerie
+          <input type="file" id="mediaGallery" accept="image/*,video/*,.pdf,.doc,.docx" multiple style="display:none;">
+        </label>
+        <label class="btn btn-secondary" style="text-align:center;">
+          Photo
+          <input type="file" id="mediaCameraPhoto" accept="image/*" capture="environment" style="display:none;">
+        </label>
+        <label class="btn btn-secondary" style="text-align:center;">
+          Vidéo
+          <input type="file" id="mediaCameraVideo" accept="video/*" capture="environment" style="display:none;">
+        </label>
+      </div>
+      <div class="media-grid" id="mediaGrid"></div>
+      <label>Légende (optionnelle)</label>
+      <textarea id="mediaCaption" placeholder="Un message à joindre…" style="min-height:70px;"></textarea>
+      <div style="height:12px"></div>
+      <button class="btn btn-primary" id="shareWhatsappBtn">Partager via WhatsApp</button>
+      <div class="counter" id="mediaStatus" style="text-align:left;margin-top:8px;"></div>
+    </div>
+  </div>
+
+  <!-- ===================== PROGRAMMÉS (rappels, pas d'envoi automatique) ===================== -->
+  <div class="tabpanel" id="tab-scheduled">
+    <div class="hint">
+      Ceci programme un <strong>rappel</strong>, pas un envoi automatique : à la date et
+      l'heure choisies, l'app prépare les envois et vous prévient — vous gardez la main,
+      un appui sur Envoyer reste nécessaire à chaque lot (ou, pour WhatsApp, un tap par
+      contact), comme partout ailleurs dans l'app. Aucun envoi n'a lieu si l'app n'est pas
+      ouverte à ce moment-là ou juste après.
+    </div>
+    <div class="card">
+      <h2>Nouveau rappel</h2>
+      <label>Type d'envoi</label>
+      <select id="schedType">
+        <option value="sms">SMS</option>
+        <option value="email">E-mail</option>
+        <option value="whatsapp">WhatsApp</option>
+      </select>
+      <div id="schedSubjectWrap" style="display:none;">
+        <label>Objet</label>
+        <input type="text" id="schedSubject" placeholder="Objet de l'e-mail">
+      </div>
+      <div id="schedSenderWrap">
+        <label>Numéro expéditeur (mémo)</label>
+        <select id="schedSenderNumber">
+          <option value="07 49 97 09 18">07 49 97 09 18</option>
+          <option value="07 48 93 56 86" selected>07 48 93 56 86</option>
+          <option value="__other__">Autre numéro…</option>
+        </select>
+        <input type="tel" inputmode="tel" id="schedSenderOther" placeholder="Numéro" style="display:none;margin-top:8px;">
+      </div>
+      <label>Message</label>
+      <textarea id="schedBody" placeholder="Votre message…"></textarea>
+      <label>Date et heure</label>
+      <input type="datetime-local" id="schedWhen">
+      <label>Destinataires</label>
+      <div id="schedRecipientPicker"></div>
+      <div id="schedBatchWrap">
+        <label>Taille des lots</label>
+        <input type="number" id="schedBatchSize" value="15" min="1">
+      </div>
+      <div style="height:12px"></div>
+      <button class="btn btn-primary" id="createSchedBtn">Créer le rappel</button>
+      <div class="counter" id="notifPermStatus" style="text-align:left;margin-top:10px;">
+        <button class="btn btn-secondary btn-small" id="askNotifBtn" type="button">Activer les notifications</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Rappels enregistrés</h2>
+      <div id="schedList"><div class="empty">Aucun rappel programmé.</div></div>
+    </div>
+  </div>
+
+  <!-- ===================== NUMÉROS BLOQUÉS ===================== -->
+  <div class="tabpanel" id="tab-blocked">
+    <div class="hint">
+      Un numéro bloqué ici est refusé <strong>partout dans l'app</strong> : impossible de
+      l'ajouter à un contact, à une base de numéros, ou de lui envoyer un message — même
+      par erreur. Ça se synchronise sur tous vos téléphones comme le reste.
+    </div>
+    <div class="card">
+      <h2>🚫 Bloquer des numéros</h2>
+      <label>Indicatif par défaut (pour les numéros sans indicatif)</label>
+      <select id="blockedCountry" style="margin-bottom:4px;"></select>
+      <label>Numéro(s) à bloquer</label>
+      <textarea id="blockedNumbersInput" inputmode="tel" style="min-height:90px;" placeholder="Un numéro par ligne, ou collez une liste…"></textarea>
+      <div style="height:10px"></div>
+      <button class="btn btn-danger" id="addBlockedBtn">🚫 Bloquer</button>
+    </div>
+    <div class="card">
+      <h2>Numéros bloqués (<span id="blockedCount">0</span>)</h2>
+      <input type="text" id="blockedFilterInput" placeholder="Rechercher un numéro bloqué…" style="margin-bottom:10px;">
+      <div id="blockedList"><div class="empty">Aucun numéro bloqué.</div></div>
+    </div>
+  </div>
+
+  <!-- ===================== BASES DE NUMÉROS ===================== -->
+  <div class="tabpanel" id="tab-bases">
+    <div class="hint">
+      Ici vous gérez des listes de <strong>numéros de téléphone seuls</strong> (pas besoin de nom), par exemple une base « Clients Abidjan » de 300 numéros. Pour l'envoi, vous choisissez une base et une taille de lot (10, 15…) : l'app vous prépare automatiquement le prochain lot de numéros à chaque fois que vous appuyez sur Envoyer, jusqu'à épuiser la base.
+    </div>
+
+    <div class="card">
+      <h2>Créer une base de numéros</h2>
+      <label>Nom de la base</label>
+      <input type="text" id="baseName" placeholder="Ex. Clients Abidjan">
+      <label>Indicatif par défaut (pour les numéros sans indicatif)</label>
+      <select id="baseCountry" style="margin-bottom:4px;"></select>
+      <label>Numéros</label>
+      <textarea id="baseNumbers" inputmode="tel" style="min-height:110px;" placeholder="Touchez ce champ, un numéro par ligne, ou collez une liste&#10;Ex.&#10;0748935686&#10;0749970918&#10;+2250102030405"></textarea>
+      <p class="dim" style="margin:6px 0 0;font-size:12px;">Collez autant de numéros que vous voulez. Les doublons sont supprimés automatiquement. Un numéro qui commence par 0 recevra l'indicatif choisi ci-dessus ; un numéro qui commence déjà par + est gardé tel quel.</p>
+      <div style="height:12px"></div>
+      <button class="btn btn-primary" id="createBaseBtn">Créer la base</button>
+    </div>
+
+    <div class="card">
+      <h2>Vos bases (<span id="baseCount">0</span>)</h2>
+      <div id="baseList"><div class="empty">Aucune base pour l'instant.</div></div>
+    </div>
+
+    <div class="card">
+      <h2>Envoi par lots depuis une base</h2>
+      <label>Base à utiliser</label>
+      <select id="baseSendSelect"><option value="">— Choisir une base —</option></select>
+      <div class="counter" id="baseSendInfo" style="text-align:left;margin-top:4px;"></div>
+      <label>Message</label>
+      <textarea id="baseSmsBody" placeholder="Votre message…"></textarea>
+      <label>Numéro expéditeur (mémo)</label>
+      <select id="baseSenderNumber">
+        <option value="07 49 97 09 18">07 49 97 09 18</option>
+        <option value="07 48 93 56 86" selected>07 48 93 56 86</option>
+        <option value="__other__">Autre numéro…</option>
+      </select>
+      <input type="tel" inputmode="tel" id="baseSenderOther" placeholder="Numéro" style="display:none;margin-top:8px;">
+      <label>Taille du lot</label>
+      <input type="number" id="baseBatchSize" value="15" min="1">
+      <div style="height:12px"></div>
+      <div class="row">
+        <button class="btn btn-primary" id="prepareBaseBatchBtn">Préparer le prochain lot</button>
+        <button class="btn btn-danger btn-small" id="resetBaseSendBtn" style="flex:0 0 auto;">Recommencer</button>
+      </div>
+    </div>
+    <div id="baseCurrentBatch"></div>
+    <div class="hint">⚠️ Si l'envoi échoue ou ne part pas : sur Android, envoyer à plusieurs numéros d'un coup passe souvent en « message de groupe » (MMS), qui a besoin d'internet actif. Dans les réglages de votre appli SMS, désactivez « Messagerie de groupe » (ou choisissez « Envoyer individuellement ») pour un envoi fiable. En cas de doute, mettez la taille du lot à 1 pour tester en SMS classique.</div>
+  </div>
+
+  <footer>SHAMAN PRODUCTION — outil interne d'envoi groupé</footer>
+</div>
+
+<script>
+/* ================= STORAGE ================= */
+const DB_KEY = 'shaman_production_db_v1';
+function loadDB(){
+  try{
+    const raw = localStorage.getItem(DB_KEY);
+    if(raw) return JSON.parse(raw);
+  }catch(e){}
+  return { contacts: [], groups: [], scheduled: [] };
+}
+function saveDB(){
+  localStorage.setItem(DB_KEY, JSON.stringify(db));
+  scheduleSyncPush();
+}
+let db = loadDB();
+if(!db.scheduled) db.scheduled = [];
+if(!db.phoneBases) db.phoneBases = [];
+if(!db.blockedNumbers) db.blockedNumbers = [];
+// "Tombstones" : quand un élément est supprimé, on garde une trace de son id
+// (avec la date de suppression) au lieu de simplement le retirer du tableau.
+// SANS ça, une synchronisation avec un autre téléphone (ou le cloud) qui n'a
+// pas encore vu la suppression le RESSUSCITE automatiquement, parce que la
+// fusion ne sait qu'additionner les deux côtés. Avec la tombstone, la fusion
+// sait qu'un id supprimé ne doit plus jamais être réintégré.
+if(!db.tombstones) db.tombstones = { contacts:{}, groups:{}, scheduled:{}, phoneBases:{}, blockedNumbers:{} };
+['contacts','groups','scheduled','phoneBases','blockedNumbers'].forEach(k => { if(!db.tombstones[k]) db.tombstones[k] = {}; });
+function markDeleted(kind, id){
+  db.tombstones[kind][id] = Date.now();
+}
+// Numéro bloqué ? Comparaison sur la forme normalisée (+indicatif) pour que
+// "0748935686" et "+2250748935686" soient reconnus comme le même numéro.
+function isBlocked(normalizedNumber){
+  return db.blockedNumbers.some(b => b.number === normalizedNumber);
+}
+// Retire d'une base tout numéro devenu bloqué entre-temps (ex. bloqué après
+// coup, ou arrivé via une synchro d'un autre téléphone). Ajuste le curseur
+// et empêche le numéro de revenir via la synchro (deletedNumbers). Renvoie
+// le nombre de numéros retirés.
+function stripBlockedFromBase(base){
+  if(!base.numbers.some(n => isBlocked(n))) return 0;
+  let removed = 0;
+  const kept = [];
+  base.numbers.forEach((n, i) => {
+    if(isBlocked(n)){
+      removed++;
+      if(i < base.cursor) base.cursor -= 1;
+      if(!base.deletedNumbers) base.deletedNumbers = [];
+      base.deletedNumbers.push(n);
+    } else {
+      kept.push(n);
+    }
+  });
+  base.numbers = kept;
+  delete base.pendingBatch;
+  base.updatedAt = Date.now();
+  return removed;
+}
+// Nettoyage léger : au-delà de 6 mois, une tombstone n'a plus d'utilité
+// (tous les téléphones ont eu largement le temps de synchroniser la
+// suppression), donc on l'oublie pour ne pas alourdir les données indéfiniment.
+(function pruneOldTombstones(){
+  const cutoff = Date.now() - 180*24*60*60*1000;
+  Object.values(db.tombstones).forEach(map => {
+    Object.keys(map).forEach(id => { if(map[id] < cutoff) delete map[id]; });
+  });
+})();
+
+/* ================= SYNCHRONISATION MULTI-TÉLÉPHONES =================
+   On stocke tout dans le même projet Firebase que vos autres apps, mais
+   dans un "tiroir" séparé (/sms-app/workspaces/{code}) pour ne jamais
+   toucher aux données de votre site vidéo. Simples appels REST — pas
+   besoin de charger le SDK Firebase (garde l'app légère et hors-ligne).
+
+   IMPORTANT : chaque synchronisation FUSIONNE les données (par id unique)
+   au lieu de remplacer — un contact ou une base créés sur un téléphone ne
+   sont donc jamais effacés par la synchronisation d'un autre téléphone. */
+const SYNC_DB_URL = 'https://shaman-chooz-chanel-default-rtdb.firebaseio.com';
+const SYNC_PATH = 'sms-app/workspaces';
+const SYNC_CODE_KEY = 'shaman_sms_sync_code';
+const SYNC_AUTO_KEY = 'shaman_sms_sync_auto';
+
+function getSyncCode(){ return (localStorage.getItem(SYNC_CODE_KEY) || '').trim(); }
+function setSyncCode(code){ localStorage.setItem(SYNC_CODE_KEY, code); }
+// Auto-sync est activé PAR DÉFAUT dès qu'un code est renseigné (c'est le
+// comportement souhaité : la synchro doit se faire toute seule dès qu'il y
+// a internet, sans action supplémentaire de l'utilisateur).
+function isAutoSyncOn(){
+  const v = localStorage.getItem(SYNC_AUTO_KEY);
+  return v === null ? true : v === 'true';
+}
+function setAutoSync(on){ localStorage.setItem(SYNC_AUTO_KEY, on ? 'true' : 'false'); }
+
+function syncUrl(code){ return `${SYNC_DB_URL}/${SYNC_PATH}/${encodeURIComponent(code)}.json`; }
+
+function updateSyncStatus(text){
+  const el = document.getElementById('syncStatus');
+  if(el) el.textContent = text;
+}
+
+// Fusionne deux maps de tombstones (id -> date de suppression) : on garde
+// la date la plus récente pour chaque id supprimé, des deux côtés.
+function mergeTombstones(localT, remoteT){
+  const out = { ...(remoteT || {}) };
+  Object.entries(localT || {}).forEach(([id, ts]) => {
+    if(!out[id] || ts > out[id]) out[id] = ts;
+  });
+  return out;
+}
+
+// Fusionne deux tableaux par id : garde tous les éléments des deux côtés,
+// sans doublon, SAUF ceux dont l'id est dans les tombstones (supprimés
+// volontairement d'un côté ou de l'autre — jamais ressuscités).
+function mergeById(localArr, remoteArr, tombstones){
+  const map = new Map();
+  (localArr || []).forEach(item => { if(!tombstones[item.id]) map.set(item.id, item); });
+  (remoteArr || []).forEach(item => { if(!tombstones[item.id] && !map.has(item.id)) map.set(item.id, item); });
+  return Array.from(map.values());
+}
+
+// Bases de numéros : en plus de garder toutes les bases des deux côtés (hors
+// celles supprimées via tombstone), si UNE MÊME base (même id) existe des
+// deux côtés, on fusionne ses numéros (union, sans doublon, hors numéros
+// supprimés individuellement — jamais de perte de numéro ajouté). Pour la
+// progression d'envoi (curseur + lot en cours), on ne peut PAS se contenter
+// de garder "le plus grand chiffre" : une réinitialisation volontaire fait
+// justement redescendre le curseur à 0, et un max() bête l'annulerait dès
+// la synchro suivante. On compare donc "updatedAt" (l'heure de la dernière
+// action sur cette base) et c'est cette version-là, entière, qui l'emporte
+// pour le curseur et le lot en cours — plus récent = qui a raison.
+function mergePhoneBases(localArr, remoteArr, tombstones){
+  const map = new Map();
+  (localArr || []).forEach(b => { if(!tombstones[b.id]) map.set(b.id, b); });
+  (remoteArr || []).forEach(rb => {
+    if(tombstones[rb.id]) return;
+    const lb = map.get(rb.id);
+    if(!lb){ map.set(rb.id, rb); return; }
+    const deletedNumbers = new Set([...(lb.deletedNumbers || []), ...(rb.deletedNumbers || [])]);
+    const numbers = Array.from(new Set([...(lb.numbers || []), ...(rb.numbers || [])]))
+      .filter(n => !deletedNumbers.has(n));
+    const lu = lb.updatedAt || 0;
+    const ru = rb.updatedAt || 0;
+    let cursor, pendingBatch, updatedAt;
+    if(lu === ru){
+      // Égalité (ou anciennes données sans horodatage) : filet de sécurité,
+      // on ne perd jamais un progrès déjà fait d'un côté ou de l'autre.
+      cursor = Math.max(lb.cursor || 0, rb.cursor || 0);
+      const lbOk = lb.pendingBatch && lb.pendingBatch.start === cursor;
+      const rbOk = rb.pendingBatch && rb.pendingBatch.start === cursor;
+      pendingBatch = lbOk ? lb.pendingBatch : (rbOk ? rb.pendingBatch : undefined);
+      updatedAt = lu;
+    } else if(lu > ru){
+      cursor = lb.cursor || 0;
+      pendingBatch = lb.pendingBatch;
+      updatedAt = lu;
+    } else {
+      cursor = rb.cursor || 0;
+      pendingBatch = rb.pendingBatch;
+      updatedAt = ru;
+    }
+    map.set(rb.id, {
+      ...rb, ...lb,
+      numbers,
+      deletedNumbers: Array.from(deletedNumbers),
+      cursor,
+      pendingBatch,
+      updatedAt
+    });
+  });
+  return Array.from(map.values());
+}
+
+function mergeDb(local, remote){
+  if(!remote) return local;
+  const rt = remote.tombstones || {};
+  const lt = local.tombstones || {};
+  const tombstones = {
+    contacts: mergeTombstones(lt.contacts, rt.contacts),
+    groups: mergeTombstones(lt.groups, rt.groups),
+    scheduled: mergeTombstones(lt.scheduled, rt.scheduled),
+    phoneBases: mergeTombstones(lt.phoneBases, rt.phoneBases),
+    blockedNumbers: mergeTombstones(lt.blockedNumbers, rt.blockedNumbers)
+  };
+  return {
+    contacts: mergeById(local.contacts, remote.contacts, tombstones.contacts),
+    groups: mergeById(local.groups, remote.groups, tombstones.groups),
+    scheduled: mergeById(local.scheduled, remote.scheduled, tombstones.scheduled),
+    phoneBases: mergePhoneBases(local.phoneBases, remote.phoneBases, tombstones.phoneBases),
+    blockedNumbers: mergeById(local.blockedNumbers, remote.blockedNumbers, tombstones.blockedNumbers),
+    tombstones,
+    _syncedAt: Date.now()
+  };
+}
+
+// Recharge tous les affichages après une fusion de données.
+function refreshEverything(){
+  refreshGroupSelect();
+  refreshGroupChips();
+  renderContactList();
+  renderBasesList();
+  refreshBaseSendSelect();
+  renderCurrentBaseBatch();
+  renderSchedList();
+  document.getElementById('smsBatches').innerHTML = '';
+  document.getElementById('mailBatches').innerHTML = '';
+}
+
+// Synchronisation complète : récupère le cloud, fusionne avec les données
+// locales (rien n'est perdu d'aucun côté), applique le résultat ici, puis
+// renvoie ce résultat fusionné vers le cloud pour que tout le monde
+// converge vers les mêmes données.
+let syncInFlight = false;
+async function syncNow(code, opts){
+  opts = opts || {};
+  if(!code) return false;
+  if(!navigator.onLine){
+    updateSyncStatus('⚠️ Hors-ligne — sera synchronisé automatiquement dès que possible.');
+    return false;
+  }
+  if(syncInFlight) return false;
+  syncInFlight = true;
+  if(!opts.silent) updateSyncStatus('⏳ Synchronisation…');
+  try{
+    const res = await fetch(syncUrl(code));
+    const remote = res.ok ? await res.json() : null;
+
+    const before = JSON.stringify(db);
+    db = mergeDb(db, remote);
+    const changed = JSON.stringify(db) !== before;
+    localStorage.setItem(DB_KEY, JSON.stringify(db));
+    if(changed) refreshEverything();
+
+    const putRes = await fetch(syncUrl(code), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(db)
+    });
+    if(!putRes.ok) throw new Error('HTTP ' + putRes.status);
+
+    updateSyncStatus('✅ Synchronisé à ' + new Date().toLocaleTimeString());
+    return true;
+  }catch(e){
+    updateSyncStatus('⚠️ Échec de synchronisation (connexion instable ?)');
+    return false;
+  }finally{
+    syncInFlight = false;
+  }
+}
+
+let syncDebounceTimer = null;
+function scheduleSyncPush(){
+  if(!isAutoSyncOn()) return;
+  const code = getSyncCode();
+  if(!code) return;
+  clearTimeout(syncDebounceTimer);
+  syncDebounceTimer = setTimeout(() => syncNow(code, { silent: true }), 1500);
+}
+
+document.getElementById('syncCode').value = getSyncCode();
+document.getElementById('syncAutoToggle').checked = isAutoSyncOn();
+if(!getSyncCode()){
+  updateSyncStatus('⚠️ Aucune synchronisation configurée — vos données ne sont que sur cet appareil et seront perdues si son stockage est effacé. Entrez un code ci-dessus.');
+}
+
+document.getElementById('syncAutoToggle').addEventListener('change', (e) => {
+  setAutoSync(e.target.checked);
+  const code = document.getElementById('syncCode').value.trim();
+  if(e.target.checked && code){ setSyncCode(code); syncNow(code); }
+});
+
+document.getElementById('syncPushBtn').addEventListener('click', async () => {
+  const code = document.getElementById('syncCode').value.trim();
+  if(!code){ alert("Entrez un code d'espace de travail (le même sur tous vos téléphones)."); return; }
+  setSyncCode(code);
+  const ok = await syncNow(code);
+  if(ok) alert("Synchronisation terminée — vos contacts, bases et messages programmés sont à jour (rien n'a été supprimé). Entrez le même code sur vos autres téléphones pour qu'ils reçoivent tout aussi.");
+});
+
+document.getElementById('syncForget').addEventListener('click', (e) => {
+  e.preventDefault();
+  if(!confirm("Arrêter la synchronisation sur cet appareil ? Vos données restent sur le cloud et sur ce téléphone, mais ne se mettront plus à jour automatiquement.")) return;
+  localStorage.removeItem(SYNC_CODE_KEY);
+  setAutoSync(false);
+  document.getElementById('syncCode').value = '';
+  document.getElementById('syncAutoToggle').checked = false;
+  updateSyncStatus('Synchronisation désactivée sur cet appareil.');
+});
+
+// Synchronise automatiquement dès qu'une connexion est disponible : au
+// retour du réseau, quand l'app revient au premier plan, et au démarrage.
+window.addEventListener('online', () => {
+  const code = getSyncCode();
+  if(code && isAutoSyncOn()) syncNow(code, { silent: true });
+});
+document.addEventListener('visibilitychange', () => {
+  const code = getSyncCode();
+  if(document.visibilityState === 'visible' && code && isAutoSyncOn()) syncNow(code, { silent: true });
+});
+
+window.addEventListener('online', () => { if(isAutoSyncOn()) autoPullIfNewer(); });
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'visible' && isAutoSyncOn()) autoPullIfNewer();
+});
+
+
+/* ================= APPEL RAPIDE ================= */
+const quickCallNumber = document.getElementById('quickCallNumber');
+const quickCallBtn = document.getElementById('quickCallBtn');
+function updateQuickCallLink(){
+  const n = quickCallNumber.value.trim().replace(/\s+/g,'');
+  quickCallBtn.href = n ? `tel:${n}` : 'tel:';
+}
+quickCallNumber.addEventListener('input', updateQuickCallLink);
+
+/* ================= TABS ================= */
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tabpanel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+    if(btn.dataset.tab === 'sms') renderRecipientPicker('smsRecipientPicker', 'sms');
+    if(btn.dataset.tab === 'bases'){ renderBasesList(); refreshBaseSendSelect(); renderCurrentBaseBatch(); }
+    if(btn.dataset.tab === 'email') renderRecipientPicker('mailRecipientPicker', 'email');
+    if(btn.dataset.tab === 'scheduled') renderRecipientPicker('schedRecipientPicker', document.getElementById('schedType').value === 'email' ? 'email' : 'sms');
+    if(btn.dataset.tab === 'blocked') renderBlockedList(document.getElementById('blockedFilterInput').value);
+  });
+});
+
+/* ================= AVATAR FULLSCREEN ================= */
+const overlay = document.getElementById('fullscreenOverlay');
+document.getElementById('avatarBtn').addEventListener('click', () => { overlay.style.display = 'flex'; });
+overlay.addEventListener('click', () => { overlay.style.display = 'none'; });
+
+/* ================= CONTACTS ================= */
+function refreshGroupSelect(){
+  const sel = document.getElementById('cGroup');
+  sel.innerHTML = '<option value="">— Aucun —</option>' +
+    db.groups.map(g => `<option value="${g.id}">${escapeHtml(g.name)}</option>`).join('');
+}
+function refreshGroupChips(){
+  const el = document.getElementById('groupChips');
+  if(!db.groups.length){ el.innerHTML = ''; return; }
+  el.innerHTML = db.groups.map(g => {
+    const count = db.contacts.filter(c => c.group === g.id).length;
+    return `<div class="group-item">
+      <div class="name">${escapeHtml(g.name)}</div>
+      <div class="meta">${count} contact${count>1?'s':''}</div>
+      <div class="row" style="margin-top:8px;gap:6px;">
+        <button class="btn btn-secondary btn-small" data-view-group="${g.id}">Voir</button>
+        <button class="btn btn-secondary btn-small" data-edit-group="${g.id}">Renommer</button>
+        <button class="btn btn-danger btn-small" data-del-group="${g.id}">Suppr.</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  el.querySelectorAll('[data-view-group]').forEach(b => {
+    b.addEventListener('click', () => {
+      const g = db.groups.find(x => x.id === b.dataset.viewGroup);
+      document.getElementById('contactSearch').value = '';
+      renderContactList(null, g.id);
+      document.getElementById('contactList').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+  el.querySelectorAll('[data-edit-group]').forEach(b => {
+    b.addEventListener('click', () => {
+      const g = db.groups.find(x => x.id === b.dataset.editGroup);
+      const newName = prompt('Nouveau nom du groupe :', g.name);
+      if(newName && newName.trim()){
+        g.name = newName.trim();
+        saveDB(); refreshGroupSelect(); refreshGroupChips(); renderContactList();
+      }
+    });
+  });
+  el.querySelectorAll('[data-del-group]').forEach(b => {
+    b.addEventListener('click', () => {
+      const g = db.groups.find(x => x.id === b.dataset.delGroup);
+      const count = db.contacts.filter(c => c.group === g.id).length;
+      const msg = count > 0
+        ? `Supprimer « ${g.name} » ? Les ${count} contact(s) resteront, mais ne seront plus dans ce groupe.`
+        : `Supprimer « ${g.name} » ?`;
+      if(!confirm(msg)) return;
+      db.contacts.forEach(c => { if(c.group === g.id) c.group = ''; });
+      markDeleted('groups', g.id);
+      db.groups = db.groups.filter(x => x.id !== g.id);
+      saveDB(); refreshGroupSelect(); refreshGroupChips(); renderContactList();
+    });
+  });
+}
+function escapeHtml(s){
+  return (s||'').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+
+document.getElementById('addGroupBtn').addEventListener('click', () => {
+  const name = document.getElementById('gName').value.trim();
+  if(!name) return;
+  db.groups.push({ id: 'g' + Date.now(), name });
+  document.getElementById('gName').value = '';
+  saveDB(); refreshGroupSelect(); refreshGroupChips();
+});
+
+// Numéros ivoiriens (+225) : depuis la réforme de 2021, le numéro fait 10
+// chiffres et le 0 en fait partie (il ne se retire pas à l'international).
+// Les autres pays gardent la convention "0 = préfixe interurbain à retirer".
+function updateCPhoneHint(){
+  const isCI = document.getElementById('cCountry').value === '225';
+  document.getElementById('cPhone').placeholder = isCI ? 'Ex. 0748935686 (avec le 0, 10 chiffres)' : 'Ex. 748935686 (sans le 0)';
+  document.getElementById('cPhoneHint').textContent = isCI
+    ? "Numéro ivoirien : entrez les 10 chiffres avec le 0 (ex. 0748935686) — l'indicatif +225 est ajouté automatiquement."
+    : "Entrez le numéro sans le 0 initial — l'indicatif du pays choisi est ajouté automatiquement.";
+}
+document.getElementById('cCountry').addEventListener('change', updateCPhoneHint);
+
+let editingContactId = null;
+
+document.getElementById('addContactBtn').addEventListener('click', () => {
+  const name = document.getElementById('cName').value.trim();
+  const dial = document.getElementById('cCountry').value;
+  const phone = normalizePhone(document.getElementById('cPhone').value, dial);
+  const email = document.getElementById('cEmail').value.trim();
+  const group = document.getElementById('cGroup').value;
+  if(!name || (!phone && !email)){
+    alert('Entrez au moins un nom et un numéro ou un e-mail.');
+    return;
+  }
+  if(phone && isBlocked(phone)){
+    alert(`🚫 ${phone} est un numéro bloqué — impossible de l'enregistrer comme contact. Débloquez-le d'abord dans l'onglet « Bloqués » si c'est une erreur.`);
+    return;
+  }
+  if(editingContactId){
+    const c = db.contacts.find(x => x.id === editingContactId);
+    Object.assign(c, { name, phone, email, group });
+    cancelContactEdit();
+  } else {
+    db.contacts.push({ id: 'c' + Date.now() + Math.random().toString(36).slice(2,7), name, phone, email, group });
+  }
+  document.getElementById('cName').value = '';
+  document.getElementById('cPhone').value = '';
+  document.getElementById('cEmail').value = '';
+  document.getElementById('cGroup').value = '';
+  saveDB(); renderContactList(); refreshGroupChips();
+});
+
+// Splits a stored "+<dial><local>" number back into its country dial code
+// and local part, so the edit form can pre-select the right country.
+function splitPhone(fullPhone){
+  const digits = (fullPhone || '').replace('+', '');
+  const dials = Array.from(document.getElementById('cCountry').options)
+    .map(o => o.value).sort((a,b) => b.length - a.length);
+  for(const dial of dials){
+    if(digits.startsWith(dial)) return { dial, local: digits.slice(dial.length) };
+  }
+  return { dial: '225', local: digits };
+}
+
+function startContactEdit(id){
+  const c = db.contacts.find(x => x.id === id);
+  if(!c) return;
+  editingContactId = id;
+  document.getElementById('cName').value = c.name || '';
+  const { dial, local } = splitPhone(c.phone);
+  document.getElementById('cCountry').value = dial;
+  document.getElementById('cPhone').value = local;
+  updateCPhoneHint();
+  document.getElementById('cEmail').value = c.email || '';
+  document.getElementById('cGroup').value = c.group || '';
+  document.getElementById('addContactBtn').textContent = 'Enregistrer les modifications';
+  document.getElementById('cancelEditBtn').style.display = 'block';
+  document.getElementById('cName').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function cancelContactEdit(){
+  editingContactId = null;
+  document.getElementById('addContactBtn').textContent = 'Ajouter le contact';
+  document.getElementById('cancelEditBtn').style.display = 'none';
+  document.getElementById('cName').value = '';
+  document.getElementById('cPhone').value = '';
+  document.getElementById('cEmail').value = '';
+  document.getElementById('cGroup').value = '';
+}
+document.getElementById('cancelEditBtn').addEventListener('click', cancelContactEdit);
+
+function renderContactList(filter, groupFilter){
+  const el = document.getElementById('contactList');
+  document.getElementById('contactCount').textContent = db.contacts.length;
+  let list = db.contacts;
+  if(filter){
+    const f = filter.toLowerCase();
+    list = list.filter(c => (c.name||'').toLowerCase().includes(f) || (c.phone||'').includes(f) || (c.email||'').toLowerCase().includes(f));
+  }
+  let banner = '';
+  if(groupFilter){
+    list = list.filter(c => c.group === groupFilter);
+    const g = db.groups.find(x => x.id === groupFilter);
+    banner = `<div class="hint" style="display:flex;justify-content:space-between;align-items:center;">
+      <span>Groupe : ${escapeHtml(g ? g.name : '')}</span>
+      <button class="btn btn-secondary btn-small" id="clearGroupFilter" style="flex:0 0 auto;">✕ Tout voir</button>
+    </div>`;
+  }
+  if(!list.length){ el.innerHTML = banner + '<div class="empty">Aucun contact.</div>'; bindClearFilter(); return; }
+  el.innerHTML = banner + list.map(c => {
+    const g = db.groups.find(g => g.id === c.group);
+    return `<div class="group-item">
+      <div class="name">${escapeHtml(c.name)}</div>
+      <div class="meta">${escapeHtml(c.phone||'')}${c.phone && c.email ? ' · ' : ''}${escapeHtml(c.email||'')}${g ? ' · '+escapeHtml(g.name) : ''}</div>
+      <div class="row" style="margin-top:8px;gap:6px;">
+        ${c.phone ? `<a class="btn btn-secondary btn-small" style="text-decoration:none;" href="tel:${c.phone}">📞 Appeler</a>` : ''}
+        <button class="btn btn-secondary btn-small" data-edit="${c.id}">Modifier</button>
+        <button class="btn btn-danger btn-small" data-del="${c.id}">Suppr.</button>
+      </div>
+    </div>`;
+  }).join('');
+  el.querySelectorAll('[data-edit]').forEach(b => {
+    b.addEventListener('click', () => startContactEdit(b.dataset.edit));
+  });
+  el.querySelectorAll('[data-del]').forEach(b => {
+    b.addEventListener('click', () => {
+      markDeleted('contacts', b.dataset.del);
+      db.contacts = db.contacts.filter(c => c.id !== b.dataset.del);
+      if(editingContactId === b.dataset.del) cancelContactEdit();
+      saveDB(); renderContactList(document.getElementById('contactSearch').value, groupFilter);
+      refreshGroupChips();
+    });
+  });
+  bindClearFilter();
+  function bindClearFilter(){
+    const btn = document.getElementById('clearGroupFilter');
+    if(btn) btn.addEventListener('click', () => renderContactList());
+  }
+}
+document.getElementById('contactSearch').addEventListener('input', (e) => renderContactList(e.target.value));
+
+document.getElementById('exportBtn').addEventListener('click', () => {
+  const blob = new Blob([JSON.stringify(db, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'shaman-production-contacts.json';
+  a.click();
+});
+document.getElementById('importFile').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try{
+      const imported = JSON.parse(reader.result);
+      if(imported.contacts && imported.groups){
+        db = imported;
+        if(!db.scheduled) db.scheduled = [];
+        if(!db.phoneBases) db.phoneBases = [];
+        if(!db.blockedNumbers) db.blockedNumbers = [];
+        if(!db.tombstones) db.tombstones = { contacts:{}, groups:{}, scheduled:{}, phoneBases:{}, blockedNumbers:{} };
+        ['contacts','groups','scheduled','phoneBases','blockedNumbers'].forEach(k => { if(!db.tombstones[k]) db.tombstones[k] = {}; });
+        saveDB();
+        refreshGroupSelect(); refreshGroupChips(); renderContactList();
+        renderBasesList(); refreshBaseSendSelect(); renderCurrentBaseBatch();
+        renderBlockedList();
+        alert('Import réussi.');
+      } else { alert('Fichier invalide.'); }
+    }catch(err){ alert('Fichier invalide.'); }
+  };
+  reader.readAsText(file);
+});
+
+/* ================= RECIPIENT PICKER (shared by SMS & Email) ================= */
+function renderRecipientPicker(containerId, mode){
+  const el = document.getElementById(containerId);
+  const needsField = mode === 'sms' ? 'phone' : 'email';
+  const eligible = db.contacts.filter(c => c[needsField]);
+
+  let html = '';
+  if(db.groups.length){
+    html += '<div style="margin-bottom:10px;">';
+    db.groups.forEach(g => {
+      html += `<div class="check-row">
+        <input type="checkbox" class="group-check" data-group="${g.id}" data-mode="${mode}">
+        <label>Groupe : ${escapeHtml(g.name)}</label>
+      </div>`;
+    });
+    html += '</div>';
+  }
+  if(!eligible.length){
+    html += `<div class="empty">Aucun contact avec ${mode === 'sms' ? 'un numéro' : 'un e-mail'} enregistré.</div>`;
+  } else {
+    eligible.forEach(c => {
+      html += `<div class="check-row">
+        <input type="checkbox" class="contact-check" data-id="${c.id}" data-mode="${mode}" data-group="${c.group||''}">
+        <label>${escapeHtml(c.name)} — ${escapeHtml(c[needsField])}</label>
+      </div>`;
+    });
+  }
+  el.innerHTML = html;
+
+  el.querySelectorAll('.group-check').forEach(gc => {
+    gc.addEventListener('change', () => {
+      el.querySelectorAll(`.contact-check[data-group="${gc.dataset.group}"]`).forEach(cc => {
+        cc.checked = gc.checked;
+      });
+    });
+  });
+}
+
+function getSelected(containerId){
+  const el = document.getElementById(containerId);
+  const ids = Array.from(el.querySelectorAll('.contact-check:checked')).map(c => c.dataset.id);
+  return db.contacts.filter(c => ids.includes(c.id));
+}
+
+/* ================= SMS ================= */
+const smsBody = document.getElementById('smsBody');
+smsBody.addEventListener('input', () => {
+  const len = smsBody.value.length;
+  const isGSM = /^[\x00-\x7F\u00A0-\u00FF€]*$/.test(smsBody.value);
+  const perSeg = isGSM ? 160 : 70;
+  const segs = len === 0 ? 1 : Math.ceil(len / (len > perSeg ? perSeg - 7 : perSeg));
+  const counter = document.getElementById('smsCounter');
+  counter.textContent = `${len} caractère${len>1?'s':''} · ${segs} SMS${segs>1?' (message concaténé)':''}`;
+  counter.className = 'counter' + (segs > 1 ? ' warn' : '');
+});
+
+const smsSenderSelect = document.getElementById('smsSenderNumber');
+const smsSenderOther = document.getElementById('smsSenderOther');
+smsSenderSelect.addEventListener('change', () => {
+  smsSenderOther.style.display = smsSenderSelect.value === '__other__' ? 'block' : 'none';
+});
+function getSmsSenderLabel(){
+  return smsSenderSelect.value === '__other__' ? smsSenderOther.value.trim() : smsSenderSelect.value;
+}
+
+document.getElementById('buildSmsBatches').addEventListener('click', () => {
+  const recipients = getSelected('smsRecipientPicker');
+  const body = smsBody.value.trim();
+  const batchSize = Math.max(1, parseInt(document.getElementById('smsBatchSize').value) || 15);
+  const senderLabel = getSmsSenderLabel();
+  if(!recipients.length){ alert('Sélectionnez au moins un destinataire.'); return; }
+  if(!body){ alert('Écrivez un message.'); return; }
+
+  const batches = [];
+  for(let i = 0; i < recipients.length; i += batchSize){
+    batches.push(recipients.slice(i, i + batchSize));
+  }
+  renderBatches('smsBatches', batches, (batch, sep) => {
+    const numbers = batch.map(c => c.phone.replace(/\s+/g,'')).join(sep || ',');
+    return `sms:${numbers}?body=${encodeURIComponent(body)}`;
+  }, 'sms', senderLabel);
+});
+
+/* ================= EMAIL ================= */
+document.getElementById('buildMailBatches').addEventListener('click', () => {
+  const recipients = getSelected('mailRecipientPicker');
+  const subject = document.getElementById('mailSubject').value.trim();
+  const body = document.getElementById('mailBody').value.trim();
+  const batchSize = Math.max(1, parseInt(document.getElementById('mailBatchSize').value) || 40);
+  if(!recipients.length){ alert('Sélectionnez au moins un destinataire.'); return; }
+  if(!subject && !body){ alert('Écrivez un objet ou un message.'); return; }
+
+  const batches = [];
+  for(let i = 0; i < recipients.length; i += batchSize){
+    batches.push(recipients.slice(i, i + batchSize));
+  }
+  renderBatches('mailBatches', batches, (batch) => {
+    const bcc = batch.map(c => c.email).join(',');
+    return `mailto:?bcc=${encodeURIComponent(bcc)}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  }, 'email');
+});
+
+/* ================= BATCH RENDERING (shared) ================= */
+// For kind === 'sms', buildLink is called as buildLink(batch, separator) where
+// separator is ',' or ';' — some phones (notably Samsung/Tecno/Infinix stock
+// messaging apps) only parse ';'-separated recipients correctly, others only
+// ','. We offer both, plus the raw number list so the person can copy/paste
+// manually if neither prefill works.
+function renderBatches(containerId, batches, buildLink, kind, senderLabel){
+  const el = document.getElementById(containerId);
+  if(!batches.length){ el.innerHTML = ''; return; }
+
+  el.innerHTML = batches.map((batch, i) => {
+    const senderHtml = senderLabel ? `<div style="font-size:12.5px;color:#C43E71;font-weight:700;margin-bottom:8px;">📱 Envoyer depuis : ${escapeHtml(senderLabel)}</div>` : '';
+
+    if(kind === 'sms'){
+      const numbers = batch.map(c => (typeof c === 'string' ? c : c.phone).replace(/\s+/g,''));
+      const numbersText = numbers.join(', ');
+      const linkComma = buildLink(batch, ',');
+      const linkSemi = buildLink(batch, ';');
+      return `
+      <div class="batch" id="${containerId}-batch-${i}">
+        <div class="batch-head">
+          <span class="label">Lot ${i+1} / ${batches.length}</span>
+          <span class="count">${batch.length} destinataire${batch.length>1?'s':''}</span>
+        </div>
+        ${senderHtml}
+        <div class="sms-numbers" data-copy="${escapeHtml(numbersText)}" style="font-size:12.5px;color:var(--text-dim);background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px;margin-bottom:8px;word-break:break-all;">${escapeHtml(numbersText)}</div>
+        <div class="row" style="margin-bottom:6px;">
+          <a class="btn btn-primary" style="text-align:center;text-decoration:none;" href="${linkComma}" data-batch="${i}" data-container="${containerId}">Ouvrir SMS</a>
+          <button class="btn btn-secondary btn-small" data-copy-btn style="flex:0 0 auto;">📋 Copier</button>
+        </div>
+        <div class="row">
+          <a class="btn btn-secondary btn-small" style="text-align:center;text-decoration:none;flex:1;" href="${linkSemi}">Numéros incorrects ? Autre format</a>
+          <button class="btn btn-secondary btn-small" data-mark="${i}" data-container="${containerId}" style="flex:0 0 auto;">✓ Envoyé</button>
+        </div>
+      </div>`;
+    }
+
+    return `
+      <div class="batch" id="${containerId}-batch-${i}">
+        <div class="batch-head">
+          <span class="label">Lot ${i+1} / ${batches.length}</span>
+          <span class="count">${batch.length} destinataire${batch.length>1?'s':''}</span>
+        </div>
+        ${senderHtml}
+        <div class="row">
+          <a class="btn btn-primary" style="text-align:center;text-decoration:none;" href="${buildLink(batch)}" data-batch="${i}" data-container="${containerId}">Ouvrir e-mail</a>
+          <button class="btn btn-secondary btn-small" data-mark="${i}" data-container="${containerId}" style="flex:0 0 auto;">✓ Envoyé</button>
+        </div>
+      </div>`;
+  }).join('');
+
+  el.querySelectorAll('[data-mark]').forEach(b => {
+    b.addEventListener('click', () => {
+      const batchEl = document.getElementById(`${b.dataset.container}-batch-${b.dataset.mark}`);
+      if(batchEl.classList.contains('done')) return;
+      batchEl.classList.add('done');
+      batchEl.querySelector('.batch-head').insertAdjacentHTML('beforeend', '<span class="sent-badge">✓ Envoyé</span>');
+    });
+  });
+  el.querySelectorAll('[data-copy-btn]').forEach(b => {
+    b.addEventListener('click', () => {
+      const text = b.closest('.batch').querySelector('.sms-numbers').dataset.copy;
+      copyToClipboard(text, b);
+    });
+  });
+}
+
+function copyToClipboard(text, btn){
+  const done = () => {
+    const old = btn.textContent;
+    btn.textContent = '✓ Copié';
+    setTimeout(() => { btn.textContent = old; }, 1500);
+  };
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
+  } else {
+    fallbackCopy(text, done);
+  }
+}
+function fallbackCopy(text, cb){
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.focus();
+  ta.select();
+  try{ document.execCommand('copy'); if(cb) cb(); }catch(e){}
+  document.body.removeChild(ta);
+}
+
+/* ================= MEDIA / WHATSAPP ================= */
+let pickedFiles = [];
+
+function addFiles(fileList){
+  Array.from(fileList).forEach(f => pickedFiles.push(f));
+  renderMediaGrid();
+}
+document.getElementById('mediaGallery').addEventListener('change', (e) => addFiles(e.target.files));
+document.getElementById('mediaCameraPhoto').addEventListener('change', (e) => addFiles(e.target.files));
+document.getElementById('mediaCameraVideo').addEventListener('change', (e) => addFiles(e.target.files));
+
+function renderMediaGrid(){
+  const grid = document.getElementById('mediaGrid');
+  grid.innerHTML = pickedFiles.map((f, i) => {
+    const url = URL.createObjectURL(f);
+    const isVideo = f.type.startsWith('video/');
+    return `<div class="media-thumb">
+      ${isVideo ? `<video src="${url}" muted></video>` : `<img src="${url}">`}
+      <button class="rm" data-rm="${i}">✕</button>
+    </div>`;
+  }).join('');
+  grid.querySelectorAll('[data-rm]').forEach(b => {
+    b.addEventListener('click', () => {
+      pickedFiles.splice(parseInt(b.dataset.rm), 1);
+      renderMediaGrid();
+    });
+  });
+}
+
+document.getElementById('shareWhatsappBtn').addEventListener('click', async () => {
+  const status = document.getElementById('mediaStatus');
+  const caption = document.getElementById('mediaCaption').value.trim();
+  if(!pickedFiles.length && !caption){
+    status.textContent = 'Choisissez au moins un fichier ou écrivez une légende.';
+    return;
+  }
+  const shareData = {};
+  if(caption) shareData.text = caption;
+  if(pickedFiles.length){
+    if(navigator.canShare && navigator.canShare({ files: pickedFiles })){
+      shareData.files = pickedFiles;
+    }
+  }
+  try{
+    if(navigator.share){
+      await navigator.share(shareData);
+      status.textContent = 'Partage ouvert — choisissez WhatsApp puis vos contacts.';
+    } else {
+      status.textContent = "Le partage n'est pas pris en charge par ce navigateur. Ouvrez WhatsApp et joignez les fichiers manuellement depuis votre galerie.";
+    }
+  }catch(err){
+    if(err.name !== 'AbortError'){
+      status.textContent = "Partage indisponible ici — ouvrez WhatsApp et joignez les fichiers manuellement.";
+    }
+  }
+});
+
+/* ================= RAPPELS PROGRAMMÉS ================= */
+const schedTypeSelect = document.getElementById('schedType');
+schedTypeSelect.addEventListener('change', () => {
+  const type = schedTypeSelect.value;
+  document.getElementById('schedSubjectWrap').style.display = type === 'email' ? 'block' : 'none';
+  document.getElementById('schedSenderWrap').style.display = type === 'email' ? 'none' : 'block';
+  document.getElementById('schedBatchWrap').style.display = type === 'whatsapp' ? 'none' : 'block';
+  renderRecipientPicker('schedRecipientPicker', type === 'email' ? 'email' : 'sms');
+});
+
+const schedSenderSelect = document.getElementById('schedSenderNumber');
+const schedSenderOther = document.getElementById('schedSenderOther');
+schedSenderSelect.addEventListener('change', () => {
+  schedSenderOther.style.display = schedSenderSelect.value === '__other__' ? 'block' : 'none';
+});
+function getSchedSenderLabel(){
+  return schedSenderSelect.value === '__other__' ? schedSenderOther.value.trim() : schedSenderSelect.value;
+}
+
+document.getElementById('askNotifBtn').addEventListener('click', async () => {
+  if(!('Notification' in window)){
+    document.getElementById('notifPermStatus').insertAdjacentHTML('beforeend', '<span style="margin-left:8px;">Non disponible sur ce navigateur.</span>');
+    return;
+  }
+  const perm = await Notification.requestPermission();
+  document.getElementById('askNotifBtn').textContent = perm === 'granted' ? 'Notifications activées ✓' : 'Notifications refusées';
+});
+
+document.getElementById('createSchedBtn').addEventListener('click', () => {
+  const type = schedTypeSelect.value;
+  const subject = document.getElementById('schedSubject').value.trim();
+  const body = document.getElementById('schedBody').value.trim();
+  const when = document.getElementById('schedWhen').value;
+  const recipients = getSelected('schedRecipientPicker');
+  const batchSize = Math.max(1, parseInt(document.getElementById('schedBatchSize').value) || 15);
+  if(!body){ alert('Écrivez un message.'); return; }
+  if(!when){ alert('Choisissez une date et une heure.'); return; }
+  if(!recipients.length){ alert('Sélectionnez au moins un destinataire.'); return; }
+  if(type === 'email' && !subject){ alert("Écrivez un objet pour l'e-mail."); return; }
+
+  db.scheduled.push({
+    id: 's' + Date.now(),
+    type, subject, body, batchSize,
+    senderLabel: type === 'sms' ? getSchedSenderLabel() : '',
+    when: new Date(when).getTime(),
+    recipientIds: recipients.map(c => c.id),
+    status: 'pending', // pending -> ready -> done
+  });
+  saveDB();
+  document.getElementById('schedSubject').value = '';
+  document.getElementById('schedBody').value = '';
+  document.getElementById('schedWhen').value = '';
+  renderSchedList();
+});
+
+function typeLabel(type){
+  return type === 'email' ? 'E-mail' : (type === 'whatsapp' ? 'WhatsApp' : 'SMS');
+}
+
+function renderSchedList(){
+  const el = document.getElementById('schedList');
+  if(!db.scheduled.length){ el.innerHTML = '<div class="empty">Aucun rappel programmé.</div>'; return; }
+
+  const sorted = [...db.scheduled].sort((a,b) => a.when - b.when);
+  el.innerHTML = sorted.map(s => {
+    const d = new Date(s.when);
+    const dateStr = d.toLocaleString('fr-FR', { dateStyle: 'medium', timeStyle: 'short' });
+    const excerpt = s.body.length > 60 ? s.body.slice(0,60) + '…' : s.body;
+    const statusLabel = s.status === 'done' ? '✓ Envoyé' : (s.status === 'ready' ? '● Prêt à envoyer' : '○ À venir');
+    const statusColor = s.status === 'done' ? '#2496C7' : (s.status === 'ready' ? '#C43E71' : 'var(--text-dim)');
+    return `<div class="batch" id="sched-${s.id}">
+      <div class="batch-head">
+        <span class="label">${typeLabel(s.type)} · ${dateStr}</span>
+        <span class="count" style="color:${statusColor};font-weight:700;">${statusLabel}</span>
+      </div>
+      <div class="list-item" style="border:none;padding:4px 0;">
+        <div class="info">
+          <div class="name" style="font-weight:500;font-size:13.5px;">${escapeHtml(excerpt)}</div>
+          <div class="meta">${s.recipientIds.length} destinataire(s)${s.type !== 'whatsapp' ? ' · lots de '+s.batchSize : ''}</div>
+        </div>
+      </div>
+      <div class="row" style="margin-top:8px;">
+        ${s.status !== 'done' ? `<button class="btn btn-secondary btn-small" data-open-sched="${s.id}">Ouvrir les envois</button>` : ''}
+        <button class="btn btn-danger btn-small" data-del-sched="${s.id}" style="flex:0 0 auto;">Suppr.</button>
+      </div>
+      <div id="sched-batches-${s.id}"></div>
+    </div>`;
+  }).join('');
+
+  el.querySelectorAll('[data-del-sched]').forEach(b => {
+    b.addEventListener('click', () => {
+      markDeleted('scheduled', b.dataset.delSched);
+      db.scheduled = db.scheduled.filter(s => s.id !== b.dataset.delSched);
+      saveDB(); renderSchedList();
+    });
+  });
+  el.querySelectorAll('[data-open-sched]').forEach(b => {
+    b.addEventListener('click', () => openScheduledBatches(b.dataset.openSched));
+  });
+}
+
+function openScheduledBatches(id){
+  const s = db.scheduled.find(x => x.id === id);
+  if(!s) return;
+
+  if(s.type === 'email'){
+    const recipients = db.contacts.filter(c => s.recipientIds.includes(c.id) && c.email);
+    if(!recipients.length){ alert('Aucun destinataire valide (e-mail manquant ?).'); return; }
+    const batches = [];
+    for(let i = 0; i < recipients.length; i += s.batchSize) batches.push(recipients.slice(i, i + s.batchSize));
+    renderBatches('sched-batches-' + id, batches, (batch) => {
+      const bcc = batch.map(c => c.email).join(',');
+      return `mailto:?bcc=${encodeURIComponent(bcc)}&subject=${encodeURIComponent(s.subject)}&body=${encodeURIComponent(s.body)}`;
+    }, 'email');
+
+  } else if(s.type === 'whatsapp'){
+    const recipients = db.contacts.filter(c => s.recipientIds.includes(c.id) && c.phone);
+    if(!recipients.length){ alert('Aucun destinataire valide (numéro manquant ?).'); return; }
+    // WhatsApp has no multi-recipient prefill — one link per contact, opened
+    // and sent individually, same principle as everywhere else in the app.
+    const container = document.getElementById('sched-batches-' + id);
+    container.innerHTML = recipients.map((c, i) => `
+      <div class="batch" style="padding:12px;">
+        <div class="batch-head" style="margin-bottom:0;">
+          <span class="label" style="font-size:13px;">${escapeHtml(c.name)} — ${escapeHtml(c.phone)}</span>
+          <a class="btn btn-primary btn-small" style="text-decoration:none;" target="_blank"
+             href="https://wa.me/${c.phone.replace('+','')}?text=${encodeURIComponent(s.body)}">Ouvrir WhatsApp</a>
+        </div>
+      </div>
+    `).join('');
+
+  } else {
+    const recipients = db.contacts.filter(c => s.recipientIds.includes(c.id) && c.phone);
+    if(!recipients.length){ alert('Aucun destinataire valide (numéro manquant ?).'); return; }
+    const batches = [];
+    for(let i = 0; i < recipients.length; i += s.batchSize) batches.push(recipients.slice(i, i + s.batchSize));
+    renderBatches('sched-batches-' + id, batches, (batch, sep) => {
+      const numbers = batch.map(c => c.phone.replace(/\s+/g,'')).join(sep || ',');
+      return `sms:${numbers}?body=${encodeURIComponent(s.body)}`;
+    }, 'sms', s.senderLabel);
+  }
+
+  s.status = 'ready'; // stays ready until user deletes it; marking "done" is manual, like other batches
+  saveDB();
+  renderSchedList();
+}
+
+// Checks due reminders — runs on load and every 20s while the app is open.
+// Web technology has no reliable way to wake up a fully closed app at an
+// exact time, so this is honestly a "catch up when open" mechanism, not a
+// guaranteed background alarm.
+function checkSchedules(){
+  const now = Date.now();
+  let changed = false;
+  db.scheduled.forEach(s => {
+    if(s.status === 'pending' && s.when <= now){
+      s.status = 'ready';
+      changed = true;
+      if('Notification' in window && Notification.permission === 'granted'){
+        new Notification('SHAMAN PRODUCTION — rappel prêt', {
+          body: `Votre envoi programmé (${s.recipientIds.length} destinataires) est prêt.`,
+        });
+      }
+    }
+  });
+  if(changed){ saveDB(); if(document.getElementById('tab-scheduled').classList.contains('active')) renderSchedList(); }
+}
+setInterval(checkSchedules, 20000);
+
+/* ================= BASES DE NUMÉROS ================= */
+// Numbers-only lists (no name needed), independent from the Contacts.
+// Sending walks through a base with a cursor: each "Préparer le prochain
+// lot" takes the next N not-yet-sent numbers, and only advances once the
+// person confirms the batch was sent — same manual-confirmation principle
+// as everywhere else in the app.
+
+// The country dropdown already exists (full list) on the contact form —
+// clone its options instead of duplicating ~190 lines of markup.
+document.getElementById('baseCountry').innerHTML = document.getElementById('cCountry').innerHTML;
+document.getElementById('blockedCountry').innerHTML = document.getElementById('cCountry').innerHTML;
+
+/* ================= NUMÉROS BLOQUÉS =================
+   Une liste de numéros interdits, valable PARTOUT dans l'app : contacts,
+   bases de numéros, et tout envoi (SMS direct, lots de bases, programmés).
+   Stockée comme les contacts/groupes (id + tombstone), donc synchronisée
+   de la même façon fiable sur tous les téléphones. */
+function renderBlockedList(filter){
+  filter = (filter || '').trim();
+  const el = document.getElementById('blockedList');
+  const countEl = document.getElementById('blockedCount');
+  countEl.textContent = db.blockedNumbers.length;
+  const list = filter
+    ? db.blockedNumbers.filter(b => b.number.includes(filter.replace(/[^\d+]/g,'')) || (b.note||'').toLowerCase().includes(filter.toLowerCase()))
+    : db.blockedNumbers;
+  if(!list.length){
+    el.innerHTML = `<div class="empty">${filter ? 'Aucun résultat.' : 'Aucun numéro bloqué.'}</div>`;
+    return;
+  }
+  el.innerHTML = list.slice().sort((a,b) => b.addedAt - a.addedAt).map(b => `
+    <div class="list-item" id="blocked-${b.id}">
+      <div class="info">
+        <div class="name">🚫 ${escapeHtml(b.number)}</div>
+      </div>
+      <button class="btn btn-secondary btn-small" data-unblock="${b.id}">Débloquer</button>
+    </div>`).join('');
+  el.querySelectorAll('[data-unblock]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const b = db.blockedNumbers.find(x => x.id === btn.dataset.unblock);
+      if(!b) return;
+      if(!confirm(`Débloquer le numéro ${b.number} ?`)) return;
+      markDeleted('blockedNumbers', b.id);
+      db.blockedNumbers = db.blockedNumbers.filter(x => x.id !== b.id);
+      saveDB();
+      renderBlockedList(document.getElementById('blockedFilterInput').value);
+    });
+  });
+}
+
+document.getElementById('addBlockedBtn').addEventListener('click', () => {
+  const dial = document.getElementById('blockedCountry').value;
+  const parsed = parseNumbersBulk(document.getElementById('blockedNumbersInput').value, dial);
+  if(!parsed.length){ alert('Aucun numéro valide détecté.'); return; }
+  const existing = new Set(db.blockedNumbers.map(b => b.number));
+  let added = 0;
+  parsed.forEach(n => {
+    if(existing.has(n)) return;
+    db.blockedNumbers.push({ id: 'blk' + Date.now() + Math.random().toString(36).slice(2,7), number: n, addedAt: Date.now() });
+    existing.add(n);
+    added++;
+  });
+  // Nettoyage immédiat : un numéro qui vient d'être bloqué ne doit plus
+  // traîner nulle part, même s'il était déjà présent avant le blocage.
+  let removedFromBases = 0;
+  db.phoneBases.forEach(b => { removedFromBases += stripBlockedFromBase(b); });
+  let removedFromContacts = 0;
+  db.contacts.forEach(c => {
+    if(c.phone && isBlocked(c.phone)){ c.phone = ''; removedFromContacts++; }
+  });
+  document.getElementById('blockedNumbersInput').value = '';
+  saveDB();
+  renderBlockedList('');
+  if(removedFromBases > 0){ renderBasesList(); refreshBaseSendSelect(); renderCurrentBaseBatch(); }
+  if(removedFromContacts > 0){ renderContactList(); }
+  let msg = `${added} numéro${added>1?'s':''} bloqué${added>1?'s':''}.${parsed.length - added > 0 ? ' (' + (parsed.length - added) + ' déjà bloqué(s))' : ''}`;
+  if(removedFromBases > 0) msg += `\n🚫 ${removedFromBases} numéro${removedFromBases>1?'s':''} retiré${removedFromBases>1?'s':''} des bases existantes.`;
+  if(removedFromContacts > 0) msg += `\n🚫 Numéro retiré de ${removedFromContacts} contact${removedFromContacts>1?'s':''} (le contact reste, sans numéro).`;
+  alert(msg);
+});
+
+document.getElementById('blockedFilterInput').addEventListener('input', (e) => renderBlockedList(e.target.value));
+
+function normalizePhone(raw, defaultDial){
+  let s = (raw || '').trim();
+  if(!s) return '';
+  s = s.replace(/[^\d+]/g, ''); // strip spaces, dashes, dots, parentheses…
+  if(!s) return '';
+  if(s.startsWith('00')) s = '+' + s.slice(2);
+  if(s.startsWith('+')) return s;
+  if(defaultDial === '225'){
+    // Côte d'Ivoire (réforme 2021) : le numéro fait 10 chiffres et le 0 en
+    // fait partie — on le garde (ou on le rajoute s'il manque), on ne le
+    // retire jamais comme pour les autres pays.
+    if(!s.startsWith('0')) s = '0' + s;
+    return `+225${s}`;
+  }
+  s = s.replace(/^0+/, '');
+  if(!s) return '';
+  return `+${defaultDial}${s}`;
+}
+
+// Répare une fois pour toutes les numéros +225 déjà enregistrés avant cette
+// correction, qui avaient perdu leur 0 (9 chiffres au lieu de 10).
+function repairIvorianNumbers(){
+  let changed = false;
+  const fix = (n) => {
+    const m = /^\+225(\d{9})$/.exec(n || '');
+    if(m){ changed = true; return `+2250${m[1]}`; }
+    return n;
+  };
+  db.contacts.forEach(c => { if(c.phone) c.phone = fix(c.phone); });
+  db.phoneBases.forEach(b => { b.numbers = b.numbers.map(fix); });
+  if(changed) saveDB();
+  return changed;
+}
+
+function parseNumbersBulk(text, defaultDial){
+  const tokens = (text || '').split(/[\n,;]+/).map(t => t.trim()).filter(Boolean);
+  const seen = new Set();
+  const out = [];
+  tokens.forEach(t => {
+    const n = normalizePhone(t, defaultDial);
+    if(n && !seen.has(n)){ seen.add(n); out.push(n); }
+  });
+  return out;
+}
+
+document.getElementById('createBaseBtn').addEventListener('click', () => {
+  // Force la validation du texte en cours de saisie avant de le lire (par
+  // sécurité sur certains claviers Samsung qui n'enregistrent le texte
+  // qu'au moment où le champ perd le focus).
+  if(document.activeElement && typeof document.activeElement.blur === 'function'){
+    document.activeElement.blur();
+  }
+  setTimeout(() => {
+    const name = document.getElementById('baseName').value.trim();
+    const dial = document.getElementById('baseCountry').value;
+    const rawText = document.getElementById('baseNumbers').value;
+    const parsedAll = parseNumbersBulk(rawText, dial);
+    const numbers = parsedAll.filter(n => !isBlocked(n));
+    const blockedCount = parsedAll.length - numbers.length;
+    if(!name){ alert('Donnez un nom à la base.'); return; }
+    if(!rawText.trim()){ alert("Le champ des numéros est vide. Retapez vos numéros, puis appuyez à nouveau sur « Créer la base »."); return; }
+    if(!parsedAll.length){ alert("Aucun numéro valide trouvé dans le texte saisi. Vérifiez qu'il y a bien des chiffres, un numéro par ligne (ou séparés par des virgules)."); return; }
+    if(!numbers.length){ alert(`🚫 Tous les numéros saisis (${blockedCount}) sont bloqués. Aucune base créée.`); return; }
+    db.phoneBases.push({ id: 'b' + Date.now() + Math.random().toString(36).slice(2,7), name, numbers, cursor: 0, defaultDial: dial, updatedAt: Date.now() });
+    saveDB();
+    document.getElementById('baseName').value = '';
+    document.getElementById('baseNumbers').value = '';
+    renderBasesList();
+    refreshBaseSendSelect();
+
+    const blockedMsg = blockedCount > 0 ? `\n🚫 ${blockedCount} numéro${blockedCount>1?'s':''} bloqué${blockedCount>1?'s':''} ignoré${blockedCount>1?'s':''}.` : '';
+    // Une base est un gros travail de saisie — on la met immédiatement à
+    // l'abri au lieu d'attendre : synchro tout de suite si un code est déjà
+    // configuré, sinon on encourage fortement à en mettre un maintenant.
+    const code = getSyncCode();
+    if(code && isAutoSyncOn()){
+      syncNow(code).then(ok => {
+        alert(`Base « ${name} » créée avec ${numbers.length} numéro${numbers.length > 1 ? 's' : ''}.${blockedMsg}` +
+          (ok ? ' ✅ Sauvegardée dans le cloud tout de suite.' : ' ⚠️ Pas encore sauvegardée dans le cloud (vérifiez votre connexion) — retentez « Synchroniser maintenant » en haut de l\'écran.'));
+      });
+    } else {
+      alert(`Base « ${name} » créée avec ${numbers.length} numéro${numbers.length > 1 ? 's' : ''}.${blockedMsg}\n\n⚠️ Elle n'est encore QUE sur ce téléphone. Pour ne jamais la perdre, remplissez le « Code d'espace de travail » tout en haut et synchronisez maintenant.`);
+    }
+  }, 50);
+});
+
+function renderBasesList(){
+  const el = document.getElementById('baseList');
+  document.getElementById('baseCount').textContent = db.phoneBases.length;
+  if(!db.phoneBases.length){ el.innerHTML = '<div class="empty">Aucune base pour l\'instant.</div>'; return; }
+
+  el.innerHTML = db.phoneBases.map(b => {
+    return `<div class="group-item" id="base-${b.id}">      <div class="name">${escapeHtml(b.name)} <button class="btn btn-secondary btn-small" data-rename-base="${b.id}" style="padding:2px 8px;font-size:11px;">✏️</button></div>
+      <div class="meta" id="base-meta-${b.id}">${baseMetaHtml(b)}</div>
+      <div class="row" style="margin-top:8px;gap:6px;flex-wrap:wrap;">
+        <button class="btn btn-secondary btn-small" data-view-numbers="${b.id}">👁 Voir les numéros</button>
+        <button class="btn btn-secondary btn-small" data-add-numbers="${b.id}">+ Ajouter des numéros</button>
+        <button class="btn btn-secondary btn-small" data-copy-base="${b.id}">📋 Copier tout</button>
+        <button class="btn btn-secondary btn-small" data-duplicate-base="${b.id}">⧉ Dupliquer</button>
+        <button class="btn btn-secondary btn-small" data-reset-base="${b.id}">Réinitialiser l'envoi</button>
+        <button class="btn btn-danger btn-small" data-del-base="${b.id}">Suppr.</button>
+      </div>
+      <div id="base-view-${b.id}" style="display:none;margin-top:10px;"></div>
+      <div id="base-add-${b.id}" style="display:none;margin-top:10px;">
+        <textarea id="base-add-text-${b.id}" inputmode="tel" style="min-height:80px;" placeholder="Un numéro par ligne, ou collez une liste…"></textarea>
+        <div style="height:8px"></div>
+        <button class="btn btn-primary btn-small" data-confirm-add="${b.id}">Ajouter à la base</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  el.querySelectorAll('[data-rename-base]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const b = db.phoneBases.find(x => x.id === btn.dataset.renameBase);
+      if(!b) return;
+      const name = prompt('Nouveau nom de la base :', b.name);
+      if(!name || !name.trim() || name.trim() === b.name) return;
+      b.name = name.trim();
+      b.updatedAt = Date.now();
+      saveDB();
+      renderBasesList();
+      refreshBaseSendSelect();
+    });
+  });
+  el.querySelectorAll('[data-duplicate-base]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const b = db.phoneBases.find(x => x.id === btn.dataset.duplicateBase);
+      if(!b) return;
+      db.phoneBases.push({
+        id: 'b' + Date.now() + Math.random().toString(36).slice(2,7),
+        name: b.name + ' (copie)',
+        numbers: [...b.numbers],
+        cursor: 0,
+        defaultDial: b.defaultDial,
+        updatedAt: Date.now()
+      });
+      saveDB();
+      renderBasesList();
+      refreshBaseSendSelect();
+    });
+  });
+
+  el.querySelectorAll('[data-view-numbers]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const panel = document.getElementById('base-view-' + btn.dataset.viewNumbers);
+      if(panel.style.display === 'none'){
+        openBaseNumbersView(btn.dataset.viewNumbers);
+        panel.style.display = 'block';
+      } else {
+        panel.style.display = 'none';
+      }
+    });
+  });
+  el.querySelectorAll('[data-add-numbers]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const panel = document.getElementById('base-add-' + btn.dataset.addNumbers);
+      panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+    });
+  });
+  el.querySelectorAll('[data-confirm-add]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if(document.activeElement && typeof document.activeElement.blur === 'function'){
+        document.activeElement.blur();
+      }
+      setTimeout(() => {
+        const b = db.phoneBases.find(x => x.id === btn.dataset.confirmAdd);
+        if(!b) return;
+        const textarea = document.getElementById('base-add-text-' + b.id);
+        if(!textarea.value.trim()){ alert("Le champ est vide. Retapez les numéros, puis réessayez."); return; }
+        const existing = new Set(b.numbers);
+        const parsed = parseNumbersBulk(textarea.value, b.defaultDial || '225');
+        const notBlocked = parsed.filter(n => !isBlocked(n));
+        const blockedCount = parsed.length - notBlocked.length;
+        const added = notBlocked.filter(n => !existing.has(n));
+        const skipped = notBlocked.length - added.length;
+        b.numbers.push(...added);
+        b.updatedAt = Date.now();
+        textarea.value = '';
+        saveDB();
+        updateBaseMeta(b.id);
+        refreshBaseSendSelect();
+        const code = getSyncCode();
+        const doublonMsg = skipped > 0 ? ` (${skipped} doublon${skipped>1?'s':''} ignoré${skipped>1?'s':''})` : '';
+        const blockedMsg = blockedCount > 0 ? ` 🚫 ${blockedCount} numéro${blockedCount>1?'s':''} bloqué${blockedCount>1?'s':''} refusé${blockedCount>1?'s':''}.` : '';
+        if(code && isAutoSyncOn()){
+          syncNow(code).then(ok => {
+            alert(`${added.length} numéro${added.length>1?'s':''} ajouté${added.length>1?'s':''}${doublonMsg}.${blockedMsg}` +
+              (ok ? ' ✅ Sauvegardé dans le cloud.' : ' ⚠️ Pas encore sauvegardé dans le cloud — vérifiez votre connexion.'));
+          });
+        } else {
+          alert(`${added.length} numéro${added.length>1?'s':''} ajouté${added.length>1?'s':''}${doublonMsg}.${blockedMsg}\n\n⚠️ Pas encore sauvegardé ailleurs que sur ce téléphone — pensez à configurer la synchronisation en haut de l'écran.`);
+        }
+      }, 50);
+    });
+  });
+  el.querySelectorAll('[data-copy-base]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const b = db.phoneBases.find(x => x.id === btn.dataset.copyBase);
+      if(b) copyToClipboard(b.numbers.join(', '), btn);
+    });
+  });
+  el.querySelectorAll('[data-reset-base]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const b = db.phoneBases.find(x => x.id === btn.dataset.resetBase);
+      if(!b) return;
+      if(!confirm(`Recommencer l'envoi depuis le début pour « ${b.name} » ?`)) return;
+      b.cursor = 0;
+      delete b.pendingBatch;
+      b.updatedAt = Date.now();
+      saveDB();
+      updateBaseMeta(b.id);
+      updateBaseSendInfo();
+      renderCurrentBaseBatch();
+      // Cette remise à zéro doit être respectée même si un autre téléphone
+      // synchronise juste après avec une ancienne progression : on force
+      // l'envoi immédiat vers le cloud pour que ce soit elle qui gagne.
+      const code = getSyncCode();
+      if(code && isAutoSyncOn()) syncNow(code);
+    });
+  });
+  el.querySelectorAll('[data-del-base]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const b = db.phoneBases.find(x => x.id === btn.dataset.delBase);
+      if(!b) return;
+      if(!confirm(`Supprimer la base « ${b.name} » (${b.numbers.length} numéros) ?`)) return;
+      markDeleted('phoneBases', b.id);
+      db.phoneBases = db.phoneBases.filter(x => x.id !== b.id);
+      saveDB();
+      renderBasesList();
+      refreshBaseSendSelect();
+      renderCurrentBaseBatch();
+    });
+  });
+}
+
+// Liste détaillée des numéros d'une base : recherche, édition en place et
+// suppression individuelle. Les index passés dans data-* sont les vrais
+// index dans base.numbers (pas ceux de la liste filtrée à l'écran).
+// Le champ de recherche n'est créé QU'UNE FOIS (openBaseNumbersView) — on ne
+// touche ensuite qu'au conteneur des lignes, sinon recréer l'input à chaque
+// frappe fait sauter le curseur au début et les chiffres tapés à l'envers.
+function openBaseNumbersView(baseId){
+  const panel = document.getElementById('base-view-' + baseId);
+  if(!panel) return;
+  panel.innerHTML = `
+    <input type="text" placeholder="Filtrer les numéros…" id="base-filter-${baseId}" style="margin-bottom:8px;">
+    <div id="base-rows-${baseId}" style="max-height:320px;overflow-y:auto;"></div>`;
+  const filterInput = document.getElementById(`base-filter-${baseId}`);
+  filterInput.addEventListener('input', () => renderBaseNumbersRows(baseId, filterInput.value));
+  renderBaseNumbersRows(baseId, '');
+}
+
+function renderBaseNumbersRows(baseId, filter){
+  const base = db.phoneBases.find(x => x.id === baseId);
+  const rowsEl = document.getElementById('base-rows-' + baseId);
+  if(!base || !rowsEl) return;
+  const cleanFilter = (filter || '').replace(/\s+/g, '');
+
+  const rows = base.numbers
+    .map((n, idx) => ({ n, idx }))
+    .filter(o => !cleanFilter || o.n.includes(cleanFilter));
+
+  rowsEl.innerHTML = rows.length
+    ? rows.map(o => `
+      <div class="list-item" data-row="${o.idx}">
+        <input type="tel" inputmode="tel" value="${escapeHtml(o.n)}" data-edit-number="${o.idx}"
+          style="flex:1;margin-right:8px;padding:8px 10px;font-size:13.5px;">
+        <button class="btn btn-danger btn-small" data-del-number="${o.idx}" style="flex:0 0 auto;">Suppr.</button>
+      </div>`).join('')
+    : '<div class="empty">Aucun numéro ne correspond.</div>';
+
+  rowsEl.querySelectorAll('[data-edit-number]').forEach(inp => {
+    inp.addEventListener('change', () => {
+      const idx = parseInt(inp.dataset.editNumber);
+      const fixed = normalizePhone(inp.value, base.defaultDial || '225');
+      if(!fixed){ inp.value = base.numbers[idx]; return; }
+      if(isBlocked(fixed)){
+        alert(`🚫 ${fixed} est un numéro bloqué — modification refusée.`);
+        inp.value = base.numbers[idx];
+        return;
+      }
+      if(fixed !== base.numbers[idx]){
+        if(!base.deletedNumbers) base.deletedNumbers = [];
+        base.deletedNumbers.push(base.numbers[idx]); // l'ancienne valeur ne doit pas revenir via la synchro
+      }
+      base.numbers[idx] = fixed;
+      delete base.pendingBatch; // le lot préparé n'est plus fiable après une modif
+      base.updatedAt = Date.now();
+      saveDB();
+      updateBaseMeta(baseId);
+      refreshBaseSendSelect();
+      renderCurrentBaseBatch();
+      renderBaseNumbersRows(baseId, filter);
+    });
+  });
+  rowsEl.querySelectorAll('[data-del-number]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.dataset.delNumber);
+      if(!confirm(`Supprimer le numéro ${base.numbers[idx]} ?`)) return;
+      if(!base.deletedNumbers) base.deletedNumbers = [];
+      base.deletedNumbers.push(base.numbers[idx]); // empêche ce numéro de revenir via la synchro
+      base.numbers.splice(idx, 1);
+      if(idx < base.cursor) base.cursor -= 1; // ne pas fausser le compte déjà traité
+      delete base.pendingBatch;
+      base.updatedAt = Date.now();
+      saveDB();
+      updateBaseMeta(baseId);
+      refreshBaseSendSelect();
+      renderCurrentBaseBatch();
+      renderBaseNumbersRows(baseId, filter);
+    });
+  });
+}
+
+// Texte + barre de progression pour une base (numéros déjà traités / total).
+function baseMetaHtml(b){
+  const restants = b.numbers.length - b.cursor;
+  const pct = b.numbers.length ? Math.round((b.cursor / b.numbers.length) * 100) : 0;
+  return `${b.numbers.length} numéro${b.numbers.length>1?'s':''} · ${b.cursor} déjà traité${b.cursor>1?'s':''} · ${restants} restant${restants>1?'s':''}
+    <div class="base-progress"><div class="base-progress-fill" style="width:${pct}%;"></div></div>`;
+}
+
+function updateBaseMeta(baseId){
+  const b = db.phoneBases.find(x => x.id === baseId);
+  const el = document.getElementById('base-meta-' + baseId);
+  if(!b || !el) return;
+  el.innerHTML = baseMetaHtml(b);
+}
+
+function refreshBaseSendSelect(){
+  const sel = document.getElementById('baseSendSelect');
+  const current = sel.value;
+  sel.innerHTML = '<option value="">— Choisir une base —</option>' +
+    db.phoneBases.map(b => `<option value="${b.id}">${escapeHtml(b.name)} (${b.numbers.length})</option>`).join('');
+  if(db.phoneBases.some(b => b.id === current)) sel.value = current;
+  updateBaseSendInfo();
+}
+
+function updateBaseSendInfo(){
+  const b = db.phoneBases.find(x => x.id === document.getElementById('baseSendSelect').value);
+  const info = document.getElementById('baseSendInfo');
+  if(!b){ info.textContent = ''; return; }
+  const restants = b.numbers.length - b.cursor;
+  info.textContent = `${b.numbers.length} numéros au total · ${b.cursor} déjà traités · ${restants} restants`;
+}
+document.getElementById('baseSendSelect').addEventListener('change', () => {
+  updateBaseSendInfo();
+  renderCurrentBaseBatch();
+});
+
+const baseSenderSelect = document.getElementById('baseSenderNumber');
+const baseSenderOther = document.getElementById('baseSenderOther');
+baseSenderSelect.addEventListener('change', () => {
+  baseSenderOther.style.display = baseSenderSelect.value === '__other__' ? 'block' : 'none';
+});
+function getBaseSenderLabel(){
+  return baseSenderSelect.value === '__other__' ? baseSenderOther.value.trim() : baseSenderSelect.value;
+}
+
+// Le lot "en préparation" (base.pendingBatch) est enregistré dans les
+// données de l'app, pas seulement en mémoire JS. Sur téléphone, ouvrir
+// l'appli SMS met souvent la page en pause et Android peut la recharger à
+// votre retour — sans ça, le bouton « Envoyé » perdait son action et
+// semblait bloqué. Comme il est sauvegardé, renderCurrentBaseBatch() le
+// retrouve et réaffiche un bouton qui fonctionne, même après un rechargement.
+function renderCurrentBaseBatch(){
+  const container = document.getElementById('baseCurrentBatch');
+  const base = db.phoneBases.find(x => x.id === document.getElementById('baseSendSelect').value);
+  if(!base || !base.pendingBatch){ container.innerHTML = ''; return; }
+
+  const { start, size, body, senderLabel } = base.pendingBatch;
+  const batch = base.numbers.slice(start, start + size);
+  if(!batch.length){
+    // La base a changé sous nos pieds (numéros supprimés) : le lot préparé
+    // n'a plus de sens, on l'abandonne proprement plutôt que d'afficher du vide.
+    delete base.pendingBatch;
+    saveDB();
+    container.innerHTML = '';
+    return;
+  }
+
+  const numbersClean = batch.map(n => n.replace(/\s+/g, ''));
+  const numbersText = numbersClean.join(', ');
+  const linkComma = `sms:${numbersClean.join(',')}?body=${encodeURIComponent(body)}`;
+  const linkSemi = `sms:${numbersClean.join(';')}?body=${encodeURIComponent(body)}`;
+
+  container.innerHTML = `
+    <div class="batch">
+      <div class="batch-head">
+        <span class="label">Lot en cours</span>
+        <span class="count">${batch.length} destinataire${batch.length > 1 ? 's' : ''}</span>
+      </div>
+      ${senderLabel ? `<div style="font-size:12.5px;color:#C43E71;font-weight:700;margin-bottom:8px;">📱 Envoyer depuis : ${escapeHtml(senderLabel)}</div>` : ''}
+      <div class="sms-numbers" style="font-size:12.5px;color:var(--text-dim);background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px;margin-bottom:8px;word-break:break-all;">${escapeHtml(numbersText)}</div>
+      <div class="row" style="margin-bottom:6px;">
+        <a class="btn btn-primary" style="text-align:center;text-decoration:none;" href="${linkComma}" id="baseOpenSmsLink">Ouvrir SMS</a>
+        <button class="btn btn-secondary btn-small" id="baseCopyBtn" style="flex:0 0 auto;">📋 Copier</button>
+      </div>
+      <div class="row">
+        <a class="btn btn-secondary btn-small" style="text-align:center;text-decoration:none;flex:1;" href="${linkSemi}">Numéros incorrects ? Autre format</a>
+        <button class="btn btn-primary btn-small" id="baseMarkSentBtn" style="flex:0 0 auto;">✓ Lot envoyé — suivant</button>
+      </div>
+    </div>`;
+
+  document.getElementById('baseCopyBtn').addEventListener('click', () => {
+    copyToClipboard(numbersText, document.getElementById('baseCopyBtn'));
+  });
+
+  // Recherche fraîche de la base par id au moment du clic : fonctionne même
+  // si la page a été rechargée entre-temps (Android en arrière-plan), tant
+  // que le pendingBatch est bien celui enregistré dans les données.
+  document.getElementById('baseMarkSentBtn').addEventListener('click', () => {
+    const b = db.phoneBases.find(x => x.id === base.id);
+    if(!b || !b.pendingBatch) return;
+    b.cursor = b.pendingBatch.start + b.pendingBatch.size;
+    delete b.pendingBatch;
+    b.updatedAt = Date.now();
+    saveDB();
+    updateBaseMeta(b.id);
+    updateBaseSendInfo();
+    renderCurrentBaseBatch();
+  });
+}
+
+document.getElementById('prepareBaseBatchBtn').addEventListener('click', () => {
+  const base = db.phoneBases.find(x => x.id === document.getElementById('baseSendSelect').value);
+  if(!base){ alert('Choisissez une base.'); return; }
+  const body = document.getElementById('baseSmsBody').value.trim();
+  if(!body){ alert('Écrivez un message.'); return; }
+  // Filet de sécurité : un numéro bloqué depuis un autre téléphone (synchro)
+  // ne doit jamais atterrir dans un lot d'envoi.
+  const removed = stripBlockedFromBase(base);
+  if(removed > 0){ updateBaseMeta(base.id); }
+  const batchSize = Math.max(1, parseInt(document.getElementById('baseBatchSize').value) || 15);
+  const remainingCount = base.numbers.length - base.cursor;
+  if(remainingCount <= 0){
+    alert((removed > 0 ? `🚫 ${removed} numéro${removed>1?'s':''} bloqué${removed>1?'s':''} retiré${removed>1?'s':''}.\n\n` : '') +
+      "Tous les numéros de cette base ont déjà été traités. Utilisez « Réinitialiser l'envoi » pour recommencer depuis le début.");
+    return;
+  }
+  base.pendingBatch = {
+    start: base.cursor,
+    size: Math.min(batchSize, remainingCount),
+    body,
+    senderLabel: getBaseSenderLabel()
+  };
+  base.updatedAt = Date.now();
+  saveDB();
+  renderCurrentBaseBatch();
+  if(removed > 0) alert(`🚫 ${removed} numéro${removed>1?'s':''} bloqué${removed>1?'s':''} retiré${removed>1?'s':''} de cette base avant l'envoi.`);
+});
+
+document.getElementById('resetBaseSendBtn').addEventListener('click', () => {
+  const base = db.phoneBases.find(x => x.id === document.getElementById('baseSendSelect').value);
+  if(!base){ alert('Choisissez une base.'); return; }
+  if(!confirm(`Recommencer l'envoi depuis le début pour « ${base.name} » ?`)) return;
+  base.cursor = 0;
+  delete base.pendingBatch;
+  base.updatedAt = Date.now();
+  saveDB();
+  updateBaseMeta(base.id);
+  updateBaseSendInfo();
+  renderCurrentBaseBatch();
+  // Cette remise à zéro doit être respectée même si un autre téléphone
+  // synchronise juste après avec une ancienne progression : on force
+  // l'envoi immédiat vers le cloud pour que ce soit elle qui gagne.
+  const code = getSyncCode();
+  if(code && isAutoSyncOn()) syncNow(code);
+});
+
+/* ================= INIT ================= */
+if(repairIvorianNumbers()){
+  console.info('Numéros +225 incomplets corrigés automatiquement (0 manquant restauré).');
+}
+refreshGroupSelect();
+refreshGroupChips();
+renderContactList();
+renderBasesList();
+refreshBaseSendSelect();
+renderCurrentBaseBatch();
+renderBlockedList('');
+checkSchedules();
+renderSchedList();
+if(getSyncCode() && isAutoSyncOn()) syncNow(getSyncCode(), { silent: true });
+
+if('serviceWorker' in navigator){
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
+}
+
+/* ================= Ouverture forcée dans Chrome + installation PWA =================
+   Un lien ouvert depuis Facebook, Messenger, Instagram, etc. s'ouvre dans leur
+   navigateur intégré (WebView) — qui NE PROPOSE JAMAIS l'installation en PWA,
+   même si tout est correctement configuré. On détecte ce cas pour rediriger
+   vers Chrome. Le bouton "Installer" (carte du haut) reste toujours visible
+   et pilote l'installation réelle dès qu'elle est possible. */
+(function setupInstall(){
+  const ua = navigator.userAgent || '';
+  const isAndroid = /Android/i.test(ua);
+  const isIOS = /iPhone|iPad|iPod/i.test(ua);
+  const inAppBrowser = /FBAN|FBAV|FB_IAB|Instagram|Line\/|MicroMessenger|Twitter|TikTok|musical_ly|Snapchat/i.test(ua);
+  const alreadyInstalled = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+
+  const openBanner = document.getElementById('openInBrowserBanner');
+  const installBtn = document.getElementById('installAppBtn');
+  const shareBtn = document.getElementById('nativeShareBtn');
+  const copyBtn = document.getElementById('copyAppLinkBtn');
+  const qrImg = document.getElementById('appQrImg');
+  const qrFallback = document.getElementById('appQrFallback');
+
+  // Lien à partager : l'app peut être déposée sous n'importe quel nom de dépôt
+  // GitHub Pages, donc on prend toujours l'adresse RÉELLE où elle tourne
+  // actuellement plutôt que de deviner une URL à l'avance.
+  const shareUrl = location.origin + location.pathname;
+
+  // QR code généré à la volée pour ce lien exact (nécessite internet pour
+  // charger l'image la première fois ; le lien lui-même fonctionne aussi
+  // bien sûr hors connexion une fois l'app déjà ouverte au moins une fois).
+  qrImg.src = 'https://api.qrserver.com/v1/create-qr-code/?size=360x360&data=' + encodeURIComponent(shareUrl);
+  qrImg.addEventListener('load', () => { qrImg.style.display = 'inline-block'; });
+  qrImg.addEventListener('error', () => { qrFallback.style.display = 'block'; });
+
+  copyBtn.addEventListener('click', () => copyToClipboard(shareUrl, copyBtn));
+
+  if(navigator.share){
+    shareBtn.style.display = 'inline-flex';
+    shareBtn.addEventListener('click', () => {
+      navigator.share({
+        title: 'Shaman Production — Envoi SMS, E-mail, Médias',
+        text: "Installez l'application pour envoyer nos SMS/e-mails groupés :",
+        url: shareUrl
+      }).catch(() => {});
+    });
+  }
+
+  if(alreadyInstalled){
+    installBtn.textContent = '✅ Application déjà installée';
+    installBtn.disabled = true;
+    return;
+  }
+
+  if(inAppBrowser){
+    if(isAndroid){
+      const intentUrl = 'intent://' + shareUrl.replace(/^https?:\/\//,'') + '#Intent;scheme=https;package=com.android.chrome;end;';
+      openBanner.innerHTML = `⚠️ Vous êtes dans le navigateur intégré. Pour installer l'app, ouvrez-la dans Chrome.
+        <br><button id="openChromeBtn" class="btn" style="margin-top:8px;background:#fff;color:#F0603D;font-weight:700;padding:8px 16px;border-radius:10px;border:none;">Ouvrir dans Chrome</button>`;
+      openBanner.style.display = 'block';
+      document.getElementById('openChromeBtn').addEventListener('click', () => { location.href = intentUrl; });
+      installBtn.addEventListener('click', () => { location.href = intentUrl; });
+    } else {
+      openBanner.innerHTML = `⚠️ Vous êtes dans le navigateur intégré. Pour installer l'app : appuyez sur <b>⋯</b> (ou le bouton de partage) en haut, puis « Ouvrir dans le navigateur » (Safari).`;
+      openBanner.style.display = 'block';
+      installBtn.addEventListener('click', () => alert("Appuyez d'abord sur « Ouvrir dans le navigateur » en haut de l'écran, dans le menu ⋯ ou le bouton de partage."));
+    }
+    return;
+  }
+
+  if(isIOS){
+    // Safari iOS n'a pas d'installation "en un clic" pilotable par le site :
+    // le bouton explique la marche à suivre au lieu de rester inactif.
+    installBtn.addEventListener('click', () => {
+      alert("Pour installer :\n1. Appuyez sur le bouton Partager (⬆️) en bas de Safari\n2. Choisissez « Sur l'écran d'accueil »\n3. Appuyez sur Ajouter");
+    });
+    return;
+  }
+
+  // Android/Chrome hors WebView : on capte l'évènement natif d'installation
+  // pour que le bouton fonctionne réellement dès que le navigateur le permet.
+  let deferredPrompt = null;
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+  });
+  installBtn.addEventListener('click', async () => {
+    if(!deferredPrompt){
+      alert("Si le bouton ne déclenche rien, utilisez le menu ⋮ de Chrome en haut à droite, puis « Installer l'application » ou « Ajouter à l'écran d'accueil ».");
+      return;
+    }
+    deferredPrompt.prompt();
+    const choice = await deferredPrompt.userChoice;
+    if(choice.outcome === 'accepted'){
+      installBtn.textContent = '✅ Application installée';
+      installBtn.disabled = true;
+    }
+    deferredPrompt = null;
+  });
+  window.addEventListener('appinstalled', () => {
+    installBtn.textContent = '✅ Application installée';
+    installBtn.disabled = true;
+  });
+})();
+
+// Bouton "🔄 Mises à jour" : force une vérification immédiate d'une nouvelle
+// version côté serveur (au lieu d'attendre le cycle de vérif automatique du
+// navigateur, parfois lent), puis recharge dès qu'elle est prête.
+document.getElementById('checkUpdateBtn').addEventListener('click', async () => {
+  if(!('serviceWorker' in navigator)){ location.reload(); return; }
+  if(!navigator.onLine){ alert('Connectez-vous à internet pour vérifier les mises à jour.'); return; }
+  const btn = document.getElementById('checkUpdateBtn');
+  const oldLabel = btn.textContent;
+  btn.textContent = '⏳ Vérification…';
+  try{
+    const reg = await navigator.serviceWorker.getRegistration();
+    if(reg) await reg.update();
+  }catch(e){ /* on recharge quand même */ }
+  setTimeout(() => location.reload(), 400);
+});
+</script>
+</body>
+</html>
