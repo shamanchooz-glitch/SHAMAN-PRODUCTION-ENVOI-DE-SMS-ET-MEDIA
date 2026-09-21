@@ -658,6 +658,12 @@
     </div>
 
     <div class="card">
+      <h2>🗑 Corbeille (<span id="trashCount">0</span>)</h2>
+      <p class="dim" style="margin:0 0 8px;font-size:12px;">Une base supprimée reste ici <strong>7 jours</strong> et peut être restaurée en un clic, au cas où « Suppr. » aurait été touché par erreur.</p>
+      <div id="trashList"><div class="empty">Corbeille vide.</div></div>
+    </div>
+
+    <div class="card">
       <h2>Envoi par lots depuis une base</h2>
       <label>Base à utiliser</label>
       <select id="baseSendSelect"><option value="">— Choisir une base —</option></select>
@@ -714,6 +720,83 @@ if(!db.tombstones) db.tombstones = { contacts:{}, groups:{}, scheduled:{}, phone
 ['contacts','groups','scheduled','phoneBases','blockedNumbers'].forEach(k => { if(!db.tombstones[k]) db.tombstones[k] = {}; });
 function markDeleted(kind, id){
   db.tombstones[kind][id] = Date.now();
+}
+
+/* ================= CORBEILLE (bases de numéros) =================
+   Filet de sécurité local en cas de suppression involontaire d'une base
+   (ex. bouton "Suppr." touché par erreur). Stockée séparément de `db` —
+   donc jamais écrasée par un import ni mélangée à la synchro entre
+   téléphones — et purgée automatiquement après 7 jours. Restaurer une
+   base lui donne un NOUVEL identifiant (l'ancien reste marqué supprimé
+   pour de bon dans les tombstones, par design, pour ne jamais faire
+   ressusciter une suppression involontaire lors d'une synchro normale). */
+const TRASH_KEY = 'shaman_sms_bases_trash';
+const TRASH_DAYS = 7;
+function loadTrash(){
+  try{ const raw = localStorage.getItem(TRASH_KEY); if(raw) return JSON.parse(raw); }catch(e){}
+  return [];
+}
+function saveTrash(){ localStorage.setItem(TRASH_KEY, JSON.stringify(trash)); }
+let trash = loadTrash();
+(function pruneTrash(){
+  const cutoff = Date.now() - TRASH_DAYS*24*60*60*1000;
+  const before = trash.length;
+  trash = trash.filter(t => t.deletedAt >= cutoff);
+  if(trash.length !== before) saveTrash();
+})();
+function trashBase(base){
+  trash.unshift({ base: JSON.parse(JSON.stringify(base)), deletedAt: Date.now() });
+  saveTrash();
+}
+function renderTrashList(){
+  const el = document.getElementById('trashList');
+  const countEl = document.getElementById('trashCount');
+  if(!el || !countEl) return;
+  countEl.textContent = trash.length;
+  if(!trash.length){ el.innerHTML = '<div class="empty">Corbeille vide.</div>'; return; }
+  el.innerHTML = trash.map((t, i) => {
+    const daysLeft = Math.max(0, TRASH_DAYS - Math.floor((Date.now() - t.deletedAt) / (24*60*60*1000)));
+    return `<div class="group-item">
+      <div class="name">${escapeHtml(t.base.name)}</div>
+      <div class="meta">${(t.base.numbers||[]).length} numéros · supprimée le ${new Date(t.deletedAt).toLocaleDateString('fr-FR')} · disparaît dans ${daysLeft} jour${daysLeft>1?'s':''}</div>
+      <div class="row" style="margin-top:8px;gap:6px;flex-wrap:wrap;">
+        <button class="btn btn-primary btn-small" data-restore-trash="${i}">♻️ Restaurer</button>
+        <button class="btn btn-danger btn-small" data-purge-trash="${i}">Supprimer définitivement</button>
+      </div>
+    </div>`;
+  }).join('');
+  el.querySelectorAll('[data-restore-trash]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.dataset.restoreTrash, 10);
+      const entry = trash[idx];
+      if(!entry) return;
+      const restored = {
+        ...entry.base,
+        id: 'b' + Date.now() + Math.random().toString(36).slice(2,7),
+        updatedAt: Date.now()
+      };
+      db.phoneBases.push(restored);
+      trash.splice(idx, 1);
+      saveDB();
+      saveTrash();
+      renderBasesList();
+      refreshBaseSendSelect();
+      renderCurrentBaseBatch();
+      renderTrashList();
+      alert(`Base « ${restored.name} » restaurée (${(restored.numbers||[]).length} numéros).`);
+    });
+  });
+  el.querySelectorAll('[data-purge-trash]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.dataset.purgeTrash, 10);
+      const entry = trash[idx];
+      if(!entry) return;
+      if(!confirm(`Supprimer définitivement « ${entry.base.name} » de la corbeille ? Cette action est irréversible.`)) return;
+      trash.splice(idx, 1);
+      saveTrash();
+      renderTrashList();
+    });
+  });
 }
 // Numéro bloqué ? Comparaison sur la forme normalisée (+indicatif) pour que
 // "0748935686" et "+2250748935686" soient reconnus comme le même numéro.
@@ -1231,18 +1314,50 @@ document.getElementById('importFile').addEventListener('change', (e) => {
   reader.onload = () => {
     try{
       const imported = JSON.parse(reader.result);
-      if(imported.contacts && imported.groups){
-        db = imported;
-        if(!db.scheduled) db.scheduled = [];
-        if(!db.phoneBases) db.phoneBases = [];
-        if(!db.blockedNumbers) db.blockedNumbers = [];
-        if(!db.tombstones) db.tombstones = { contacts:{}, groups:{}, scheduled:{}, phoneBases:{}, blockedNumbers:{} };
-        ['contacts','groups','scheduled','phoneBases','blockedNumbers'].forEach(k => { if(!db.tombstones[k]) db.tombstones[k] = {}; });
+      if(imported.contacts !== undefined || imported.phoneBases !== undefined || imported.groups !== undefined){
+        // IMPORTANT : on FUSIONNE avec les données actuelles, on ne les
+        // remplace jamais — sinon importer un vieux fichier de secours
+        // effacerait tout ce qui a été ajouté depuis sur ce téléphone.
+        const lt = db.tombstones || { contacts:{}, groups:{}, scheduled:{}, phoneBases:{}, blockedNumbers:{} };
+        db.contacts = mergeById(db.contacts, imported.contacts, lt.contacts || {});
+        db.groups = mergeById(db.groups, imported.groups, lt.groups || {});
+        db.scheduled = mergeById(db.scheduled, imported.scheduled, lt.scheduled || {});
+        db.blockedNumbers = mergeById(db.blockedNumbers, imported.blockedNumbers, lt.blockedNumbers || {});
+        // Bases de numéros : import = restauration volontaire. On leur donne
+        // un NOUVEL identifiant à chaque fois, pour ne jamais se heurter à
+        // une éventuelle tombstone (verrou de suppression permanent, locale
+        // ou déjà propagée dans le cloud) laissée par l'ancien id. Si une
+        // base du même nom existe déjà, on précise la date d'import pour
+        // les distinguer facilement.
+        const existingNames = new Set(db.phoneBases.map(b => b.name));
+        let importedBasesCount = 0, importedNumbersCount = 0;
+        (imported.phoneBases || []).forEach(b => {
+          const name = existingNames.has(b.name)
+            ? `${b.name} (import ${new Date().toLocaleDateString('fr-FR')})`
+            : b.name;
+          db.phoneBases.push({
+            ...b,
+            id: 'b' + Date.now() + Math.random().toString(36).slice(2,7),
+            name,
+            updatedAt: Date.now()
+          });
+          existingNames.add(name);
+          importedBasesCount++;
+          importedNumbersCount += (b.numbers || []).length;
+        });
         saveDB();
         refreshGroupSelect(); refreshGroupChips(); renderContactList();
         renderBasesList(); refreshBaseSendSelect(); renderCurrentBaseBatch();
         renderBlockedList();
-        alert('Import réussi.');
+        const code = getSyncCode();
+        const summary = `Import terminé : ${importedBasesCount} base${importedBasesCount>1?'s':''} de numéros (${importedNumbersCount} numéros) ajoutée${importedBasesCount>1?'s':''}, en plus de vos données existantes.`;
+        if(code && isAutoSyncOn()){
+          syncNow(code).then(ok => {
+            alert(summary + (ok ? ' ✅ Sauvegardé dans le cloud.' : ' ⚠️ Pas encore sauvegardé dans le cloud — vérifiez votre connexion.'));
+          });
+        } else {
+          alert(summary);
+        }
       } else { alert('Fichier invalide.'); }
     }catch(err){ alert('Fichier invalide.'); }
   };
@@ -1974,15 +2089,18 @@ function renderBasesList(){
     btn.addEventListener('click', () => {
       const b = db.phoneBases.find(x => x.id === btn.dataset.delBase);
       if(!b) return;
-      if(!confirm(`Supprimer la base « ${b.name} » (${b.numbers.length} numéros) ?`)) return;
+      if(!confirm(`Supprimer la base « ${b.name} » (${b.numbers.length} numéros) ?\n\n(Pas d'inquiétude : elle restera 7 jours dans la Corbeille en cas d'erreur.)`)) return;
+      trashBase(b);
       markDeleted('phoneBases', b.id);
       db.phoneBases = db.phoneBases.filter(x => x.id !== b.id);
       saveDB();
       renderBasesList();
       refreshBaseSendSelect();
       renderCurrentBaseBatch();
+      renderTrashList();
     });
   });
+  renderTrashList();
 }
 
 // Liste détaillée des numéros d'une base : recherche, édition en place et
