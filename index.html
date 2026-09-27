@@ -1632,10 +1632,12 @@ function getSchedSource(){
 }
 function updateSchedSourceUI(){
   const type = schedTypeSelect.value;
-  // Les bases de numéros n'ont pas d'adresse e-mail : option masquée pour ce type.
-  document.getElementById('schedSourceRow').style.display = type === 'email' ? 'none' : 'flex';
+  // Les bases de numéros n'ont pas d'adresse e-mail, et pour WhatsApp il n'y
+  // a pas de notion de "lot" (un lien à ouvrir par numéro) : cette source
+  // n'a donc de sens que pour le SMS.
+  document.getElementById('schedSourceRow').style.display = type === 'sms' ? 'flex' : 'none';
   let source = getSchedSource();
-  if(type === 'email' && source === 'base'){
+  if(type !== 'sms' && source === 'base'){
     document.querySelector('input[name="schedSource"][value="contacts"]').checked = true;
     source = 'contacts';
   }
@@ -1655,9 +1657,14 @@ function refreshSchedBaseSelect(){
 function updateSchedBaseInfo(){
   const info = document.getElementById('schedBaseInfo');
   const b = db.phoneBases.find(x => x.id === document.getElementById('schedBaseSelect').value);
-  info.textContent = b ? `${b.numbers.length} numéros au total · ${b.cursor} déjà traités ailleurs · ${b.numbers.length - b.cursor} disponibles pour ce rappel` : '';
+  if(!b){ info.textContent = ''; return; }
+  const batchSize = Math.max(1, parseInt(document.getElementById('schedBatchSize').value) || 15);
+  const restants = b.numbers.length - b.cursor;
+  const prochainLot = Math.max(0, Math.min(batchSize, restants));
+  info.textContent = `${restants} numéros restants dans cette base à ce jour · ce rappel enverra le PROCHAIN lot de ${prochainLot} numéro(s) (comme dans « Envoi par lots ») — pas tout le reste d'un coup`;
 }
 document.getElementById('schedBaseSelect').addEventListener('change', updateSchedBaseInfo);
+document.getElementById('schedBatchSize').addEventListener('input', updateSchedBaseInfo);
 schedTypeSelect.addEventListener('change', () => {
   const type = schedTypeSelect.value;
   document.getElementById('schedSubjectWrap').style.display = type === 'email' ? 'block' : 'none';
@@ -1707,15 +1714,13 @@ document.getElementById('createSchedBtn').addEventListener('click', () => {
   if(source === 'base'){
     const base = db.phoneBases.find(x => x.id === document.getElementById('schedBaseSelect').value);
     if(!base){ alert('Choisissez une base de numéros.'); return; }
-    const phones = base.numbers.slice(base.cursor);
-    if(!phones.length){ alert('Cette base n\'a plus de numéros disponibles (tous déjà traités).'); return; }
-    // On réserve ces numéros pour ce rappel : la base ne les reproposera pas
-    // ailleurs (onglet "Envoi par lots") tant que ce rappel existe.
-    base.cursor = base.numbers.length;
+    // On NE fige PAS la liste des numéros ici : comme dans "Envoi par lots",
+    // le lot sera pris sur le curseur ACTUEL de la base au moment où ce
+    // rappel sera ouvert (avance au fur et à mesure des envois, pas tout
+    // le reste d'un coup).
     entry.source = 'base';
     entry.baseId = base.id;
     entry.baseName = base.name;
-    entry.phones = phones;
   } else {
     const recipients = getSelected('schedRecipientPicker');
     if(!recipients.length){ alert('Sélectionnez au moins un destinataire.'); return; }
@@ -1728,7 +1733,6 @@ document.getElementById('createSchedBtn').addEventListener('click', () => {
   document.getElementById('schedSubject').value = '';
   document.getElementById('schedBody').value = '';
   document.getElementById('schedWhen').value = '';
-  refreshBaseSendSelect();
   renderSchedList();
 });
 
@@ -1755,7 +1759,7 @@ function renderSchedList(){
       <div class="list-item" style="border:none;padding:4px 0;">
         <div class="info">
           <div class="name" style="font-weight:500;font-size:13.5px;">${escapeHtml(excerpt)}</div>
-          <div class="meta">${s.source === 'base' ? `Base « ${escapeHtml(s.baseName||'')} » · ${s.phones.length} numéro(s)` : `${s.recipientIds.length} destinataire(s)`}${s.type !== 'whatsapp' ? ' · lots de '+s.batchSize : ''}</div>
+          <div class="meta">${schedRecipientMeta(s)}</div>
         </div>
       </div>
       <div class="row" style="margin-top:8px;">
@@ -1768,26 +1772,39 @@ function renderSchedList(){
 
   el.querySelectorAll('[data-del-sched]').forEach(b => {
     b.addEventListener('click', () => {
-      const s = db.scheduled.find(x => x.id === b.dataset.delSched);
-      // Si ce rappel réservait des numéros d'une base et n'a pas encore été
-      // envoyé, on les rend disponibles à nouveau dans l'onglet "Envoi par lots".
-      if(s && s.source === 'base' && s.status !== 'done'){
-        const base = db.phoneBases.find(x => x.id === s.baseId);
-        if(base) base.cursor = Math.max(0, base.cursor - s.phones.length);
-      }
       markDeleted('scheduled', b.dataset.delSched);
       db.scheduled = db.scheduled.filter(s => s.id !== b.dataset.delSched);
-      saveDB(); renderSchedList(); refreshBaseSendSelect();
+      saveDB(); renderSchedList();
     });
   });
   el.querySelectorAll('[data-open-sched]').forEach(b => {
     b.addEventListener('click', () => openScheduledBatches(b.dataset.openSched));
   });
+  // Après un rechargement de page, on retrouve les lots "base" déjà en
+  // préparation et on les réaffiche directement (comme dans l'onglet Bases SMS).
+  sorted.forEach(s => { if(s.source === 'base' && s.pendingBatch) renderSchedBaseBatch(s); });
+}
+
+function schedRecipientMeta(s){
+  if(s.source === 'base'){
+    const base = db.phoneBases.find(x => x.id === s.baseId);
+    if(s.status === 'done') return `Base « ${escapeHtml(s.baseName||'')} » · lot déjà envoyé`;
+    if(!base) return `Base « ${escapeHtml(s.baseName||'')} » (supprimée)`;
+    const restants = base.numbers.length - base.cursor;
+    const prochainLot = Math.max(0, Math.min(s.batchSize, restants));
+    return `Base « ${escapeHtml(base.name)} » · prochain lot : ${prochainLot} numéro(s) (${restants} restants au total)`;
+  }
+  return `${s.recipientIds.length} destinataire(s)${s.type !== 'whatsapp' ? ' · lots de '+s.batchSize : ''}`;
 }
 
 function openScheduledBatches(id){
   const s = db.scheduled.find(x => x.id === id);
   if(!s) return;
+
+  if(s.source === 'base'){
+    renderSchedBaseBatch(s);
+    return;
+  }
 
   if(s.type === 'email'){
     const recipients = db.contacts.filter(c => s.recipientIds.includes(c.id) && c.email);
@@ -1800,30 +1817,28 @@ function openScheduledBatches(id){
     }, 'email');
 
   } else if(s.type === 'whatsapp'){
-    // Source "base" : numéros bruts déjà figés dans le rappel. Source "contacts" : contacts avec numéro.
-    const phones = s.source === 'base' ? s.phones : db.contacts.filter(c => s.recipientIds.includes(c.id) && c.phone).map(c => c.phone);
-    const labels = s.source === 'base' ? s.phones : db.contacts.filter(c => s.recipientIds.includes(c.id) && c.phone).map(c => `${c.name} — ${c.phone}`);
-    if(!phones.length){ alert('Aucun destinataire valide (numéro manquant ?).'); return; }
+    const recipients = db.contacts.filter(c => s.recipientIds.includes(c.id) && c.phone);
+    if(!recipients.length){ alert('Aucun destinataire valide (numéro manquant ?).'); return; }
     // WhatsApp has no multi-recipient prefill — one link per contact, opened
     // and sent individually, same principle as everywhere else in the app.
     const container = document.getElementById('sched-batches-' + id);
-    container.innerHTML = phones.map((phone, i) => `
+    container.innerHTML = recipients.map((c, i) => `
       <div class="batch" style="padding:12px;">
         <div class="batch-head" style="margin-bottom:0;">
-          <span class="label" style="font-size:13px;">${escapeHtml(labels[i])}</span>
+          <span class="label" style="font-size:13px;">${escapeHtml(c.name)} — ${escapeHtml(c.phone)}</span>
           <a class="btn btn-primary btn-small" style="text-decoration:none;" target="_blank"
-             href="https://wa.me/${phone.replace(/\s+/g,'').replace('+','')}?text=${encodeURIComponent(s.body)}">Ouvrir WhatsApp</a>
+             href="https://wa.me/${c.phone.replace('+','')}?text=${encodeURIComponent(s.body)}">Ouvrir WhatsApp</a>
         </div>
       </div>
     `).join('');
 
   } else {
-    const phones = s.source === 'base' ? s.phones : db.contacts.filter(c => s.recipientIds.includes(c.id) && c.phone).map(c => c.phone);
-    if(!phones.length){ alert('Aucun destinataire valide (numéro manquant ?).'); return; }
+    const recipients = db.contacts.filter(c => s.recipientIds.includes(c.id) && c.phone);
+    if(!recipients.length){ alert('Aucun destinataire valide (numéro manquant ?).'); return; }
     const batches = [];
-    for(let i = 0; i < phones.length; i += s.batchSize) batches.push(phones.slice(i, i + s.batchSize));
+    for(let i = 0; i < recipients.length; i += s.batchSize) batches.push(recipients.slice(i, i + s.batchSize));
     renderBatches('sched-batches-' + id, batches, (batch, sep) => {
-      const numbers = batch.map(p => p.replace(/\s+/g,'')).join(sep || ',');
+      const numbers = batch.map(c => c.phone.replace(/\s+/g,'')).join(sep || ',');
       return `sms:${numbers}?body=${encodeURIComponent(s.body)}`;
     }, 'sms', s.senderLabel);
   }
@@ -1831,6 +1846,85 @@ function openScheduledBatches(id){
   s.status = 'ready'; // stays ready until user deletes it; marking "done" is manual, like other batches
   saveDB();
   renderSchedList();
+}
+
+// Rappel programmé sourcé sur une base : fonctionne EXACTEMENT comme
+// "Envoi par lots depuis une base" (onglet Bases SMS) — un seul lot à la
+// fois, pris sur le curseur ACTUEL de la base (pas figé à la création du
+// rappel), et le curseur n'avance que lorsque « Lot envoyé » est confirmé.
+// Le lot en préparation (s.pendingBatch) est sauvegardé dans les données,
+// pas seulement en mémoire, pour survivre à un rechargement de la page.
+function renderSchedBaseBatch(s){
+  const container = document.getElementById('sched-batches-' + s.id);
+  const base = db.phoneBases.find(x => x.id === s.baseId);
+  if(!base){ if(container) container.innerHTML = '<div class="empty">Cette base a été supprimée.</div>'; return; }
+
+  if(!s.pendingBatch){
+    const removed = stripBlockedFromBase(base);
+    if(removed > 0) updateBaseMeta(base.id);
+    const remainingCount = base.numbers.length - base.cursor;
+    if(remainingCount <= 0){
+      alert((removed > 0 ? `🚫 ${removed} numéro${removed>1?'s':''} bloqué${removed>1?'s':''} retiré${removed>1?'s':''}.\n\n` : '') +
+        'Tous les numéros de cette base ont déjà été traités (via ce rappel ou ailleurs dans l\'app).');
+      return;
+    }
+    s.pendingBatch = { start: base.cursor, size: Math.min(s.batchSize, remainingCount) };
+    saveDB();
+    if(removed > 0) alert(`🚫 ${removed} numéro${removed>1?'s':''} bloqué${removed>1?'s':''} retiré${removed>1?'s':''} de cette base avant l'envoi.`);
+  }
+
+  const { start, size } = s.pendingBatch;
+  const batch = base.numbers.slice(start, start + size);
+  if(!batch.length){
+    // La base a changé sous nos pieds (numéros supprimés) : on abandonne ce
+    // lot proprement plutôt que d'afficher du vide.
+    delete s.pendingBatch;
+    saveDB();
+    container.innerHTML = '';
+    return;
+  }
+
+  const numbersClean = batch.map(n => n.replace(/\s+/g, ''));
+  const numbersText = numbersClean.join(', ');
+  const linkComma = `sms:${numbersClean.join(',')}?body=${encodeURIComponent(s.body)}`;
+  const linkSemi = `sms:${numbersClean.join(';')}?body=${encodeURIComponent(s.body)}`;
+
+  container.innerHTML = `
+    <div class="batch">
+      <div class="batch-head">
+        <span class="label">Lot en cours — ${escapeHtml(base.name)}</span>
+        <span class="count">${batch.length} destinataire${batch.length > 1 ? 's' : ''}</span>
+      </div>
+      ${s.senderLabel ? `<div style="font-size:12.5px;color:#C43E71;font-weight:700;margin-bottom:8px;">📱 Envoyer depuis : ${escapeHtml(s.senderLabel)}</div>` : ''}
+      <div class="sms-numbers" style="font-size:12.5px;color:var(--text-dim);background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px;margin-bottom:8px;word-break:break-all;">${escapeHtml(numbersText)}</div>
+      <div class="row" style="margin-bottom:6px;">
+        <a class="btn btn-primary" style="text-align:center;text-decoration:none;" href="${linkComma}">Ouvrir SMS</a>
+        <button class="btn btn-secondary btn-small" id="schedBaseCopyBtn-${s.id}" style="flex:0 0 auto;">📋 Copier</button>
+      </div>
+      <div class="row">
+        <a class="btn btn-secondary btn-small" style="text-align:center;text-decoration:none;flex:1;" href="${linkSemi}">Numéros incorrects ? Autre format</a>
+        <button class="btn btn-primary btn-small" id="schedBaseMarkSentBtn-${s.id}" style="flex:0 0 auto;">✓ Lot envoyé</button>
+      </div>
+    </div>`;
+
+  document.getElementById(`schedBaseCopyBtn-${s.id}`).addEventListener('click', () => {
+    copyToClipboard(numbersText, document.getElementById(`schedBaseCopyBtn-${s.id}`));
+  });
+
+  document.getElementById(`schedBaseMarkSentBtn-${s.id}`).addEventListener('click', () => {
+    const freshS = db.scheduled.find(x => x.id === s.id);
+    const freshBase = db.phoneBases.find(x => x.id === s.baseId);
+    if(!freshS || !freshS.pendingBatch || !freshBase) return;
+    freshBase.cursor = freshS.pendingBatch.start + freshS.pendingBatch.size;
+    freshBase.updatedAt = Date.now();
+    delete freshS.pendingBatch;
+    // Ce rappel avait un seul lot à envoyer : il est maintenant terminé.
+    // Pour envoyer le lot suivant, programmez un nouveau rappel — comme
+    // pour n'importe quel autre envoi programmé de l'app.
+    freshS.status = 'done';
+    saveDB();
+    renderSchedList();
+  });
 }
 
 // Checks due reminders — runs on load and every 20s while the app is open.
