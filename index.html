@@ -591,8 +591,17 @@
       <textarea id="schedBody" placeholder="Votre message…"></textarea>
       <label>Date et heure</label>
       <input type="datetime-local" id="schedWhen">
+      <label>Destinataires depuis</label>
+      <div class="row" id="schedSourceRow" style="margin-bottom:8px;">
+        <label class="check-row" style="flex:1;"><input type="radio" name="schedSource" value="contacts" checked> Contacts / Groupes</label>
+        <label class="check-row" style="flex:1;"><input type="radio" name="schedSource" value="base"> Base de numéros</label>
+      </div>
       <label>Destinataires</label>
       <div id="schedRecipientPicker"></div>
+      <div id="schedBaseWrap" style="display:none;">
+        <select id="schedBaseSelect"><option value="">— Choisir une base —</option></select>
+        <div class="counter" id="schedBaseInfo" style="text-align:left;margin-top:4px;"></div>
+      </div>
       <div id="schedBatchWrap">
         <label>Taille des lots</label>
         <input type="number" id="schedBatchSize" value="15" min="1">
@@ -1092,7 +1101,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     if(btn.dataset.tab === 'sms') renderRecipientPicker('smsRecipientPicker', 'sms');
     if(btn.dataset.tab === 'bases'){ renderBasesList(); refreshBaseSendSelect(); renderCurrentBaseBatch(); }
     if(btn.dataset.tab === 'email') renderRecipientPicker('mailRecipientPicker', 'email');
-    if(btn.dataset.tab === 'scheduled') renderRecipientPicker('schedRecipientPicker', document.getElementById('schedType').value === 'email' ? 'email' : 'sms');
+    if(btn.dataset.tab === 'scheduled'){ renderRecipientPicker('schedRecipientPicker', document.getElementById('schedType').value === 'email' ? 'email' : 'sms'); updateSchedSourceUI(); }
     if(btn.dataset.tab === 'blocked') renderBlockedList(document.getElementById('blockedFilterInput').value);
   });
 });
@@ -1616,12 +1625,46 @@ document.getElementById('shareWhatsappBtn').addEventListener('click', async () =
 
 /* ================= RAPPELS PROGRAMMÉS ================= */
 const schedTypeSelect = document.getElementById('schedType');
+const schedSourceRadios = () => Array.from(document.querySelectorAll('input[name="schedSource"]'));
+function getSchedSource(){
+  const checked = schedSourceRadios().find(r => r.checked);
+  return checked ? checked.value : 'contacts';
+}
+function updateSchedSourceUI(){
+  const type = schedTypeSelect.value;
+  // Les bases de numéros n'ont pas d'adresse e-mail : option masquée pour ce type.
+  document.getElementById('schedSourceRow').style.display = type === 'email' ? 'none' : 'flex';
+  let source = getSchedSource();
+  if(type === 'email' && source === 'base'){
+    document.querySelector('input[name="schedSource"][value="contacts"]').checked = true;
+    source = 'contacts';
+  }
+  document.getElementById('schedRecipientPicker').style.display = source === 'base' ? 'none' : 'block';
+  document.getElementById('schedBaseWrap').style.display = source === 'base' ? 'block' : 'none';
+  if(source === 'base') refreshSchedBaseSelect();
+}
+schedSourceRadios().forEach(r => r.addEventListener('change', updateSchedSourceUI));
+function refreshSchedBaseSelect(){
+  const sel = document.getElementById('schedBaseSelect');
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">— Choisir une base —</option>' +
+    db.phoneBases.map(b => `<option value="${b.id}">${escapeHtml(b.name)} (${b.numbers.length - b.cursor} restants)</option>`).join('');
+  if(db.phoneBases.some(b => b.id === prev)) sel.value = prev;
+  updateSchedBaseInfo();
+}
+function updateSchedBaseInfo(){
+  const info = document.getElementById('schedBaseInfo');
+  const b = db.phoneBases.find(x => x.id === document.getElementById('schedBaseSelect').value);
+  info.textContent = b ? `${b.numbers.length} numéros au total · ${b.cursor} déjà traités ailleurs · ${b.numbers.length - b.cursor} disponibles pour ce rappel` : '';
+}
+document.getElementById('schedBaseSelect').addEventListener('change', updateSchedBaseInfo);
 schedTypeSelect.addEventListener('change', () => {
   const type = schedTypeSelect.value;
   document.getElementById('schedSubjectWrap').style.display = type === 'email' ? 'block' : 'none';
   document.getElementById('schedSenderWrap').style.display = type === 'email' ? 'none' : 'block';
   document.getElementById('schedBatchWrap').style.display = type === 'whatsapp' ? 'none' : 'block';
   renderRecipientPicker('schedRecipientPicker', type === 'email' ? 'email' : 'sms');
+  updateSchedSourceUI();
 });
 
 const schedSenderSelect = document.getElementById('schedSenderNumber');
@@ -1647,25 +1690,45 @@ document.getElementById('createSchedBtn').addEventListener('click', () => {
   const subject = document.getElementById('schedSubject').value.trim();
   const body = document.getElementById('schedBody').value.trim();
   const when = document.getElementById('schedWhen').value;
-  const recipients = getSelected('schedRecipientPicker');
+  const source = getSchedSource();
   const batchSize = Math.max(1, parseInt(document.getElementById('schedBatchSize').value) || 15);
   if(!body){ alert('Écrivez un message.'); return; }
   if(!when){ alert('Choisissez une date et une heure.'); return; }
-  if(!recipients.length){ alert('Sélectionnez au moins un destinataire.'); return; }
   if(type === 'email' && !subject){ alert("Écrivez un objet pour l'e-mail."); return; }
 
-  db.scheduled.push({
+  let entry = {
     id: 's' + Date.now(),
     type, subject, body, batchSize,
     senderLabel: type === 'sms' ? getSchedSenderLabel() : '',
     when: new Date(when).getTime(),
-    recipientIds: recipients.map(c => c.id),
     status: 'pending', // pending -> ready -> done
-  });
+  };
+
+  if(source === 'base'){
+    const base = db.phoneBases.find(x => x.id === document.getElementById('schedBaseSelect').value);
+    if(!base){ alert('Choisissez une base de numéros.'); return; }
+    const phones = base.numbers.slice(base.cursor);
+    if(!phones.length){ alert('Cette base n\'a plus de numéros disponibles (tous déjà traités).'); return; }
+    // On réserve ces numéros pour ce rappel : la base ne les reproposera pas
+    // ailleurs (onglet "Envoi par lots") tant que ce rappel existe.
+    base.cursor = base.numbers.length;
+    entry.source = 'base';
+    entry.baseId = base.id;
+    entry.baseName = base.name;
+    entry.phones = phones;
+  } else {
+    const recipients = getSelected('schedRecipientPicker');
+    if(!recipients.length){ alert('Sélectionnez au moins un destinataire.'); return; }
+    entry.source = 'contacts';
+    entry.recipientIds = recipients.map(c => c.id);
+  }
+
+  db.scheduled.push(entry);
   saveDB();
   document.getElementById('schedSubject').value = '';
   document.getElementById('schedBody').value = '';
   document.getElementById('schedWhen').value = '';
+  refreshBaseSendSelect();
   renderSchedList();
 });
 
@@ -1692,7 +1755,7 @@ function renderSchedList(){
       <div class="list-item" style="border:none;padding:4px 0;">
         <div class="info">
           <div class="name" style="font-weight:500;font-size:13.5px;">${escapeHtml(excerpt)}</div>
-          <div class="meta">${s.recipientIds.length} destinataire(s)${s.type !== 'whatsapp' ? ' · lots de '+s.batchSize : ''}</div>
+          <div class="meta">${s.source === 'base' ? `Base « ${escapeHtml(s.baseName||'')} » · ${s.phones.length} numéro(s)` : `${s.recipientIds.length} destinataire(s)`}${s.type !== 'whatsapp' ? ' · lots de '+s.batchSize : ''}</div>
         </div>
       </div>
       <div class="row" style="margin-top:8px;">
@@ -1705,9 +1768,16 @@ function renderSchedList(){
 
   el.querySelectorAll('[data-del-sched]').forEach(b => {
     b.addEventListener('click', () => {
+      const s = db.scheduled.find(x => x.id === b.dataset.delSched);
+      // Si ce rappel réservait des numéros d'une base et n'a pas encore été
+      // envoyé, on les rend disponibles à nouveau dans l'onglet "Envoi par lots".
+      if(s && s.source === 'base' && s.status !== 'done'){
+        const base = db.phoneBases.find(x => x.id === s.baseId);
+        if(base) base.cursor = Math.max(0, base.cursor - s.phones.length);
+      }
       markDeleted('scheduled', b.dataset.delSched);
       db.scheduled = db.scheduled.filter(s => s.id !== b.dataset.delSched);
-      saveDB(); renderSchedList();
+      saveDB(); renderSchedList(); refreshBaseSendSelect();
     });
   });
   el.querySelectorAll('[data-open-sched]').forEach(b => {
@@ -1730,28 +1800,30 @@ function openScheduledBatches(id){
     }, 'email');
 
   } else if(s.type === 'whatsapp'){
-    const recipients = db.contacts.filter(c => s.recipientIds.includes(c.id) && c.phone);
-    if(!recipients.length){ alert('Aucun destinataire valide (numéro manquant ?).'); return; }
+    // Source "base" : numéros bruts déjà figés dans le rappel. Source "contacts" : contacts avec numéro.
+    const phones = s.source === 'base' ? s.phones : db.contacts.filter(c => s.recipientIds.includes(c.id) && c.phone).map(c => c.phone);
+    const labels = s.source === 'base' ? s.phones : db.contacts.filter(c => s.recipientIds.includes(c.id) && c.phone).map(c => `${c.name} — ${c.phone}`);
+    if(!phones.length){ alert('Aucun destinataire valide (numéro manquant ?).'); return; }
     // WhatsApp has no multi-recipient prefill — one link per contact, opened
     // and sent individually, same principle as everywhere else in the app.
     const container = document.getElementById('sched-batches-' + id);
-    container.innerHTML = recipients.map((c, i) => `
+    container.innerHTML = phones.map((phone, i) => `
       <div class="batch" style="padding:12px;">
         <div class="batch-head" style="margin-bottom:0;">
-          <span class="label" style="font-size:13px;">${escapeHtml(c.name)} — ${escapeHtml(c.phone)}</span>
+          <span class="label" style="font-size:13px;">${escapeHtml(labels[i])}</span>
           <a class="btn btn-primary btn-small" style="text-decoration:none;" target="_blank"
-             href="https://wa.me/${c.phone.replace('+','')}?text=${encodeURIComponent(s.body)}">Ouvrir WhatsApp</a>
+             href="https://wa.me/${phone.replace(/\s+/g,'').replace('+','')}?text=${encodeURIComponent(s.body)}">Ouvrir WhatsApp</a>
         </div>
       </div>
     `).join('');
 
   } else {
-    const recipients = db.contacts.filter(c => s.recipientIds.includes(c.id) && c.phone);
-    if(!recipients.length){ alert('Aucun destinataire valide (numéro manquant ?).'); return; }
+    const phones = s.source === 'base' ? s.phones : db.contacts.filter(c => s.recipientIds.includes(c.id) && c.phone).map(c => c.phone);
+    if(!phones.length){ alert('Aucun destinataire valide (numéro manquant ?).'); return; }
     const batches = [];
-    for(let i = 0; i < recipients.length; i += s.batchSize) batches.push(recipients.slice(i, i + s.batchSize));
+    for(let i = 0; i < phones.length; i += s.batchSize) batches.push(phones.slice(i, i + s.batchSize));
     renderBatches('sched-batches-' + id, batches, (batch, sep) => {
-      const numbers = batch.map(c => c.phone.replace(/\s+/g,'')).join(sep || ',');
+      const numbers = batch.map(p => p.replace(/\s+/g,'')).join(sep || ',');
       return `sms:${numbers}?body=${encodeURIComponent(s.body)}`;
     }, 'sms', s.senderLabel);
   }
