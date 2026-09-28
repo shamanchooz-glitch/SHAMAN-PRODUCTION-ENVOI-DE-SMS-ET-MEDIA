@@ -667,7 +667,13 @@
     <div class="card">
       <h2>📷 Scanner de numéros</h2>
       <p class="dim" style="font-size:12px;">Photographiez ou importez une image (document, liste manuscrite, capture d'écran, carte de visite…). L'app détecte les numéros de téléphone et reconnaît l'indicatif du pays, y compris quand l'écriture est floue ou difficile à lire.</p>
-      <input type="file" id="scanFiles" accept="image/*" multiple style="margin-bottom:8px;">
+      <div class="row" style="margin-bottom:8px;">
+        <button type="button" class="btn btn-secondary" id="scanCamBtn">📷 Prendre une photo</button>
+        <button type="button" class="btn btn-secondary" id="scanGalBtn">🖼️ Galerie / Fichiers</button>
+      </div>
+      <input type="file" id="scanFilesCam" accept="image/*" capture="environment" style="display:none;">
+      <input type="file" id="scanFilesGal" accept="image/*" multiple style="display:none;">
+      <div id="scanFilesInfo" class="dim" style="font-size:12px;margin-bottom:8px;">Aucune image sélectionnée.</div>
       <button class="btn btn-primary" id="scanRunBtn">🔍 Analyser</button>
       <div id="scanProgress" class="dim" style="font-size:12.5px;margin-top:8px;"></div>
     </div>
@@ -2035,7 +2041,24 @@ setInterval(checkSchedules, 20000);
 
 
 /* ================= SCANNER DE NUMÉROS (OCR) ================= */
-let scanCandidates = [], scanTessLoaded = null;
+let scanCandidates = [], scanTessLoaded = null, scanFileList = [];
+function scanUpdateFilesInfo(){
+  const el = document.getElementById('scanFilesInfo');
+  el.innerHTML = scanFileList.length
+    ? `${scanFileList.length} image(s) sélectionnée(s). <a href="#" id="scanClearFiles" style="color:var(--text-dim);">Vider</a>`
+    : 'Aucune image sélectionnée.';
+  const clr = document.getElementById('scanClearFiles');
+  if(clr) clr.addEventListener('click', (e) => { e.preventDefault(); scanFileList = []; scanUpdateFilesInfo(); });
+}
+document.getElementById('scanCamBtn').addEventListener('click', () => document.getElementById('scanFilesCam').click());
+document.getElementById('scanGalBtn').addEventListener('click', () => document.getElementById('scanFilesGal').click());
+[['scanFilesCam'], ['scanFilesGal']].forEach(([id]) => {
+  document.getElementById(id).addEventListener('change', (e) => {
+    scanFileList = scanFileList.concat(Array.from(e.target.files || []));
+    e.target.value = ''; // permet de reprendre une nouvelle photo / re-choisir le même fichier ensuite
+    scanUpdateFilesInfo();
+  });
+});
 function scanLoadTesseract(){
   if(window.Tesseract) return Promise.resolve();
   if(scanTessLoaded) return scanTessLoaded;
@@ -2149,8 +2172,8 @@ function scanLineLooksLikeNumber(text){
   return t.length >= 6;
 }
 async function scanRun(){
-  const files = Array.from(document.getElementById('scanFiles').files || []);
-  if(!files.length){ alert('Choisissez ou prenez au moins une photo.'); return; }
+  const files = scanFileList.slice();
+  if(!files.length){ alert('Prenez une photo ou choisissez au moins une image.'); return; }
   const prog = document.getElementById('scanProgress');
   const btn = document.getElementById('scanRunBtn');
   btn.disabled = true; prog.textContent = 'Chargement du moteur de reconnaissance…';
@@ -2274,7 +2297,8 @@ document.getElementById('scanSaveBtn').addEventListener('click', () => {
   if(typeof renderRobot === 'function' && document.getElementById('tab-robot')) renderRobot();
 
   scanCandidates = []; scanRenderList();
-  document.getElementById('scanFiles').value = ''; document.getElementById('scanProgress').textContent = '';
+  document.getElementById('scanFilesInfo').textContent = 'Aucune image sélectionnée.';
+  scanFileList = []; document.getElementById('scanProgress').textContent = '';
   document.getElementById('scanBaseNew').value = ''; document.getElementById('scanGroupNew').value = '';
 
   const summary = `✅ ${added} numéro(s) ajouté(s) ${label}.` +
