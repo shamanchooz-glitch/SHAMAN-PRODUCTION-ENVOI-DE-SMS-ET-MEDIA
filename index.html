@@ -209,6 +209,7 @@
     <button class="tab-btn" data-tab="media">Médias · WhatsApp</button>
     <button class="tab-btn" data-tab="scheduled">Programmés</button>
     <button class="tab-btn" data-tab="robot">🤖 Robot</button>
+    <button class="tab-btn" data-tab="scanner">📷 Scanner</button>
     <button class="tab-btn" data-tab="blocked">🚫 Bloqués</button>
   </nav>
 
@@ -637,6 +638,9 @@
       <label>Heures calmes (pas d'ouverture automatique)</label>
       <div class="row"><input id="rsQF" type="time"><input id="rsQT" type="time"></div>
       <label>Numéros par lot (par défaut)</label><input id="rsBatch" type="number" min="1">
+      <label>Quota max d'envois par jour (0 = illimité — protège contre un blocage opérateur pour spam)</label><input id="rsMaxDay" type="number" min="0">
+      <label>Décalage aléatoire autour de l'heure prévue (minutes, 0 = désactivé — évite un rythme trop robotique)</label><input id="rsJitter" type="number" min="0" max="120">
+      <div class="dim" id="robotQuotaInfo" style="font-size:12.5px;margin-top:8px;"></div>
     </div>
     <div class="card">
       <h2>Programmer le robot</h2>
@@ -650,12 +654,38 @@
       <label class="check-row" style="margin-top:8px;"><input type="checkbox" id="rbDefSched" checked> Utiliser la programmation par défaut</label>
       <div id="rbCustom" style="display:none;"><label>Jours</label><div class="row" id="rbDays" style="flex-wrap:wrap;gap:4px;"></div>
       <label>Heures (séparées par une virgule)</label><input id="rbTimes" value="09:00"></div>
-      <label>Envoyer depuis (facultatif)</label><input id="rbSender" placeholder="Numéro / SIM utilisé">
+      <label>Envoyer depuis (facultatif — plusieurs numéros séparés par une virgule = alternance à chaque lot, utile en multi-SIM)</label><input id="rbSender" placeholder="Ex. +225 07... , +225 05...">
       <button class="btn btn-primary" id="rbAddBtn" style="margin-top:10px;">➕ Ajouter au robot</button>
     </div>
     <div class="card">
       <h2>Tableau du robot (<span id="robotCount">0</span>)</h2>
       <div id="robotRules"><div class="empty">Aucune règle.</div></div>
+    </div>
+  </div>
+
+  <div class="tabpanel" id="tab-scanner">
+    <div class="card">
+      <h2>📷 Scanner de numéros</h2>
+      <p class="dim" style="font-size:12px;">Photographiez ou importez une image (document, liste manuscrite, capture d'écran, carte de visite…). L'app détecte les numéros de téléphone et reconnaît l'indicatif du pays, y compris quand l'écriture est floue ou difficile à lire.</p>
+      <input type="file" id="scanFiles" accept="image/*" multiple capture="environment" style="margin-bottom:8px;">
+      <button class="btn btn-primary" id="scanRunBtn">🔍 Analyser</button>
+      <div id="scanProgress" class="dim" style="font-size:12.5px;margin-top:8px;"></div>
+    </div>
+    <div class="card" id="scanResultsCard" style="display:none;">
+      <h2>Numéros détectés (<span id="scanCount">0</span>)</h2>
+      <p class="dim" style="font-size:12px;margin:0 0 8px;">Vérifiez et corrigez chaque numéro avant d'enregistrer — rien n'est ajouté sans votre confirmation.</p>
+      <div class="row" style="margin-bottom:8px;">
+        <button class="btn btn-secondary btn-small" id="scanSelAll">Tout cocher</button>
+        <button class="btn btn-secondary btn-small" id="scanSelNone">Tout décocher</button>
+      </div>
+      <div id="scanList"></div>
+      <label style="margin-top:10px;">Indicatif à appliquer aux numéros sans indicatif détecté</label>
+      <select id="scanDefaultDial"></select>
+      <label>Enregistrer dans</label>
+      <select id="scanDest"><option value="base">Base de numéros</option><option value="group">Groupe (contacts)</option><option value="contacts">Contacts (sans groupe)</option></select>
+      <div id="scanBaseWrap"><select id="scanBaseSelect"></select><input id="scanBaseNew" placeholder="…ou nom d'une nouvelle base"></div>
+      <div id="scanGroupWrap" style="display:none;"><select id="scanGroupSelect"></select><input id="scanGroupNew" placeholder="…ou nom d'un nouveau groupe"></div>
+      <button class="btn btn-primary" id="scanSaveBtn" style="margin-top:10px;">💾 Enregistrer la sélection</button>
     </div>
   </div>
 
@@ -1154,6 +1184,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     if(btn.dataset.tab === 'email') renderRecipientPicker('mailRecipientPicker', 'email');
     if(btn.dataset.tab === 'scheduled'){ renderRecipientPicker('schedRecipientPicker', document.getElementById('schedType').value === 'email' ? 'email' : 'sms'); updateSchedSourceUI(); }
     if(btn.dataset.tab === 'robot') renderRobot();
+    if(btn.dataset.tab === 'scanner') scanPrepUI();
     if(btn.dataset.tab === 'blocked') renderBlockedList(document.getElementById('blockedFilterInput').value);
   });
 });
@@ -2002,14 +2033,229 @@ function checkSchedules(){
 setInterval(checkSchedules, 20000);
 
 
+
+/* ================= SCANNER DE NUMÉROS (OCR) ================= */
+let scanCandidates = [], scanTessLoaded = null;
+function scanLoadTesseract(){
+  if(window.Tesseract) return Promise.resolve();
+  if(scanTessLoaded) return scanTessLoaded;
+  scanTessLoaded = new Promise((resolve, reject) => {
+    const sc = document.createElement('script');
+    sc.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+    sc.onload = resolve; sc.onerror = () => reject(new Error('Impossible de charger le moteur de reconnaissance (connexion internet requise).'));
+    document.head.appendChild(sc);
+  });
+  return scanTessLoaded;
+}
+// Prétraitement image : agrandit les petites images et augmente le contraste
+// (seuillage en noir/blanc) pour aider l'OCR sur les photos floues ou les
+// écritures pâles/manuscrites.
+function scanPreprocess(img){
+  const scale = img.width < 1400 ? Math.min(2.5, 1400 / img.width) : 1;
+  const cv = document.createElement('canvas');
+  cv.width = Math.round(img.width * scale); cv.height = Math.round(img.height * scale);
+  const ctx = cv.getContext('2d');
+  ctx.drawImage(img, 0, 0, cv.width, cv.height);
+  const id = ctx.getImageData(0, 0, cv.width, cv.height), d = id.data;
+  let sum = 0;
+  for(let i = 0; i < d.length; i += 4) sum += 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
+  const mean = sum / (d.length / 4), thr = mean * 0.92;
+  for(let i = 0; i < d.length; i += 4){
+    const g = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
+    const v = g < thr ? 0 : 255;
+    d[i] = d[i+1] = d[i+2] = v;
+  }
+  ctx.putImageData(id, 0, 0);
+  return cv;
+}
+function scanFileToImage(file){
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = URL.createObjectURL(file);
+  });
+}
+// Table des indicatifs pays : réutilise la liste déjà présente dans l'app
+// (le même menu que pour Contacts/Bases), donc TOUS les pays y figurent,
+// avec la Côte d'Ivoire prioritaire.
+function scanDialTable(){
+  return Array.from(document.getElementById('cCountry').options)
+    .map(o => ({ code: o.value, name: o.textContent.replace(/\s*\(\+\d+\)\s*$/, '') }))
+    .sort((a, b) => b.code.length - a.code.length); // codes longs testés en premier
+}
+const CI_MOBILE_PREFIXES = ['01','05','07','21','22','23','24','25','27'];
+// Corrige les confusions OCR courantes chiffres/lettres (0/O, 1/I/l, 5/S, 2/Z, 6/G, 8/B…)
+// — appliqué seulement sur des blocs déjà très majoritairement numériques.
+function scanFixDigits(tok){
+  return tok.replace(/[OoQ]/g,'0').replace(/[IlLi|]/g,'1').replace(/[Ss]/g,'5')
+    .replace(/[Zz]/g,'2').replace(/[GgQ]/g,'6').replace(/[Bb]/g,'8').replace(/[Aa]/g,'4');
+}
+function scanExtractCandidates(text){
+  const dials = scanDialTable();
+  const raw = text.match(/[+]?[0-9OolISZGgBbAaQq][0-9OolISZGgBbAaQq\s().\-]{6,}[0-9OolISZGgBbAaQq]/g) || [];
+  const out = [], seen = new Set();
+  raw.forEach(tokenRaw => {
+    let token = tokenRaw.trim();
+    const hasPlus = token.startsWith('+');
+    let digitsOnly = token.replace(/[^\dOolISZGgBbAaQq]/g, '');
+    const digitRatio = (digitsOnly.match(/\d/g) || []).length / Math.max(1, digitsOnly.length);
+    if(digitRatio < 0.6) return; // trop de lettres : pas un numéro
+    let cleaned = (hasPlus ? '+' : '') + scanFixDigits(digitsOnly);
+    cleaned = cleaned.replace(/[^\d+]/g, '');
+    let digits = cleaned.replace(/^\+/, '');
+    if(digits.length < 7 || digits.length > 15) return;
+
+    let dialCode = null, countryName = null, formatted = cleaned;
+    if(cleaned.startsWith('00')){ cleaned = '+' + cleaned.slice(2); digits = cleaned.slice(1); }
+    if(cleaned.startsWith('+')){
+      const m = dials.find(d => digits.startsWith(d.code));
+      if(m){ dialCode = m.code; countryName = m.name; }
+      formatted = cleaned;
+    } else if(digits.length === 10 && digits.startsWith('0') && CI_MOBILE_PREFIXES.includes(digits.slice(0,2))){
+      dialCode = '225'; countryName = "Côte d'Ivoire"; formatted = '+225' + digits;
+    } else {
+      formatted = digits; // pas d'indicatif détecté — sera complété au moment d'enregistrer
+    }
+    const key = formatted;
+    if(seen.has(key)) return;
+    seen.add(key);
+    out.push({ id: 's' + Math.random().toString(36).slice(2,9), value: formatted, country: countryName, include: true });
+  });
+  return out;
+}
+async function scanRun(){
+  const files = Array.from(document.getElementById('scanFiles').files || []);
+  if(!files.length){ alert('Choisissez ou prenez au moins une photo.'); return; }
+  const prog = document.getElementById('scanProgress');
+  const btn = document.getElementById('scanRunBtn');
+  btn.disabled = true; prog.textContent = 'Chargement du moteur de reconnaissance…';
+  try{
+    await scanLoadTesseract();
+    let all = [];
+    for(let i = 0; i < files.length; i++){
+      prog.textContent = `Analyse image ${i+1}/${files.length}…`;
+      const img = await scanFileToImage(files[i]);
+      const canvas = scanPreprocess(img);
+      const res = await Tesseract.recognize(canvas, 'eng', {
+        logger: m => { if(m.status === 'recognizing text') prog.textContent = `Analyse image ${i+1}/${files.length}… ${Math.round((m.progress||0)*100)}%`; }
+      });
+      all = all.concat(scanExtractCandidates(res.data.text || ''));
+      URL.revokeObjectURL(img.src);
+    }
+    const seen = new Set(); scanCandidates = all.filter(c => !seen.has(c.value) && seen.add(c.value));
+    prog.textContent = scanCandidates.length ? `${scanCandidates.length} numéro(s) détecté(s). Vérifiez la liste ci-dessous.` : "Aucun numéro détecté dans ces images. Essayez une photo plus nette ou mieux cadrée.";
+    scanRenderList();
+  } catch(e){
+    prog.textContent = ''; alert('Erreur pendant la reconnaissance : ' + (e && e.message ? e.message : e));
+  } finally { btn.disabled = false; }
+}
+function scanRenderList(){
+  const card = document.getElementById('scanResultsCard');
+  card.style.display = scanCandidates.length ? 'block' : 'none';
+  document.getElementById('scanCount').textContent = scanCandidates.length;
+  document.getElementById('scanList').innerHTML = scanCandidates.map(c => `
+    <div class="group-item" style="display:flex;align-items:center;gap:8px;">
+      <input type="checkbox" data-scan-chk="${c.id}" ${c.include ? 'checked' : ''} style="width:auto;flex:0 0 auto;">
+      <input type="text" data-scan-val="${c.id}" value="${escapeHtml(c.value)}" style="flex:1;margin:0;">
+      <span class="dim" style="font-size:11px;flex:0 0 auto;white-space:nowrap;">${c.country ? escapeHtml(c.country) : '⚠️ indicatif ?'}</span>
+    </div>`).join('');
+  document.getElementById('scanList').querySelectorAll('[data-scan-chk]').forEach(i => i.addEventListener('change', () => {
+    const c = scanCandidates.find(x => x.id === i.dataset.scanChk); if(c) c.include = i.checked;
+  }));
+  document.getElementById('scanList').querySelectorAll('[data-scan-val]').forEach(i => i.addEventListener('input', () => {
+    const c = scanCandidates.find(x => x.id === i.dataset.scanVal); if(c) c.value = i.value;
+  }));
+}
+function scanPrepUI(){
+  document.getElementById('scanDefaultDial').innerHTML = document.getElementById('cCountry').innerHTML;
+  document.getElementById('scanBaseSelect').innerHTML = '<option value="">— Choisir une base existante —</option>' +
+    db.phoneBases.map(b => `<option value="${b.id}">${escapeHtml(b.name)}</option>`).join('');
+  document.getElementById('scanGroupSelect').innerHTML = '<option value="">— Choisir un groupe existant —</option>' +
+    db.groups.map(g => `<option value="${g.id}">${escapeHtml(g.name)}</option>`).join('');
+}
+document.getElementById('scanRunBtn').addEventListener('click', scanRun);
+document.getElementById('scanSelAll').addEventListener('click', () => { scanCandidates.forEach(c => c.include = true); scanRenderList(); });
+document.getElementById('scanSelNone').addEventListener('click', () => { scanCandidates.forEach(c => c.include = false); scanRenderList(); });
+document.getElementById('scanDest').addEventListener('change', e => {
+  document.getElementById('scanBaseWrap').style.display = e.target.value === 'base' ? 'block' : 'none';
+  document.getElementById('scanGroupWrap').style.display = e.target.value === 'group' ? 'block' : 'none';
+});
+document.getElementById('scanSaveBtn').addEventListener('click', () => {
+  const defaultDial = document.getElementById('scanDefaultDial').value;
+  const selected = scanCandidates.filter(c => c.include);
+  if(!selected.length){ alert('Cochez au moins un numéro à enregistrer.'); return; }
+  const normalized = [], seen = new Set(); let invalid = 0, blocked = 0;
+  selected.forEach(c => {
+    const n = normalizePhone(c.value, defaultDial);
+    if(!n || n.replace('+','').length < 7){ invalid++; return; }
+    if(isBlocked(n)){ blocked++; return; }
+    if(seen.has(n)) return;
+    seen.add(n); normalized.push(n);
+  });
+  if(!normalized.length){ alert(`Aucun numéro valide à enregistrer.${invalid?` (${invalid} invalide(s))`:''}${blocked?` (${blocked} bloqué(s))`:''}`); return; }
+
+  const dest = document.getElementById('scanDest').value;
+  let added = 0, dupes = 0, label = '';
+
+  if(dest === 'base'){
+    let base = db.phoneBases.find(b => b.id === document.getElementById('scanBaseSelect').value);
+    const newName = document.getElementById('scanBaseNew').value.trim();
+    if(!base && newName) base = { id: 'b' + Date.now() + Math.random().toString(36).slice(2,7), name: newName, numbers: [], cursor: 0, defaultDial, updatedAt: Date.now() };
+    if(!base){ alert('Choisissez une base existante ou donnez un nom à une nouvelle base.'); return; }
+    const existing = new Set(base.numbers);
+    normalized.forEach(n => { if(existing.has(n)) dupes++; else { base.numbers.push(n); existing.add(n); added++; } });
+    base.updatedAt = Date.now();
+    if(!db.phoneBases.includes(base)) db.phoneBases.push(base);
+    label = `dans la base « ${base.name} »`;
+    saveDB(); renderBasesList(); refreshBaseSendSelect(); renderCurrentBaseBatch();
+  } else {
+    let groupId = document.getElementById('scanGroupSelect').value;
+    const newGroupName = document.getElementById('scanGroupNew').value.trim();
+    if(dest === 'group'){
+      if(!groupId && newGroupName){ const g = { id: 'g' + Date.now(), name: newGroupName }; db.groups.push(g); groupId = g.id; }
+      if(!groupId){ alert('Choisissez un groupe existant ou donnez un nom à un nouveau groupe.'); return; }
+    } else groupId = '';
+    const existingPhones = new Set(db.contacts.map(c => c.phone));
+    const stamp = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
+    normalized.forEach((n, i) => {
+      if(existingPhones.has(n)){ dupes++; return; }
+      db.contacts.push({ id: 'c' + Date.now() + Math.random().toString(36).slice(2,7), name: `Scan ${stamp} #${i+1}`, phone: n, email: '', group: groupId });
+      existingPhones.add(n); added++;
+    });
+    label = dest === 'group' ? `dans le groupe « ${(db.groups.find(g => g.id === groupId) || {}).name || ''} »` : 'dans les contacts';
+    saveDB(); refreshGroupSelect(); refreshGroupChips(); renderContactList();
+  }
+  if(typeof renderRobot === 'function' && document.getElementById('tab-robot')) renderRobot();
+
+  scanCandidates = []; scanRenderList();
+  document.getElementById('scanFiles').value = ''; document.getElementById('scanProgress').textContent = '';
+  document.getElementById('scanBaseNew').value = ''; document.getElementById('scanGroupNew').value = '';
+
+  const summary = `✅ ${added} numéro(s) ajouté(s) ${label}.` +
+    (dupes ? `\n↪️ ${dupes} déjà présent(s), ignoré(s).` : '') +
+    (invalid ? `\n⚠️ ${invalid} invalide(s), ignoré(s).` : '') +
+    (blocked ? `\n🚫 ${blocked} bloqué(s), ignoré(s).` : '');
+  const code = getSyncCode();
+  if(code && isAutoSyncOn()) syncNow(code).then(ok => alert(summary + (ok ? '\n✅ Sauvegardé dans le cloud.' : '\n⚠️ Pas encore sauvegardé dans le cloud.')));
+  else alert(summary);
+});
+
 /* ================= ROBOT D'ENVOI ================= */
 const RB_DAYS=['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'], $r=id=>document.getElementById(id);
-if(!db.robotSettings) db.robotSettings={days:[0,1,2,3,4,5,6],times:['09:00','13:00','18:00'],autoOpen:true,autoConfirm:true,quietFrom:'21:00',quietTo:'07:00',batchSize:15,updatedAt:1};
+const RB_DEFAULT_TIMES=Array.from({length:13},(_,i)=>String(8+i).padStart(2,'0')+':00'); // 08:00..20:00
+if(!db.robotSettings) db.robotSettings={days:[0,1,2,3,4,5,6],times:RB_DEFAULT_TIMES,autoOpen:true,autoConfirm:true,quietFrom:'21:00',quietTo:'07:00',batchSize:15,maxPerDay:0,jitterMin:0,updatedAt:1};
+if(!db.robotSettings.maxPerDay) db.robotSettings.maxPerDay = db.robotSettings.maxPerDay||0;
+if(db.robotSettings.jitterMin===undefined) db.robotSettings.jitterMin=0;
 let rbAwait=null, rbAwaitAt=0, rbHid=false;
 const rbDate=d=>d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0');
 const rbSched=r=>r.useDefault?db.robotSettings:r;
 function rbQuiet(){const S=db.robotSettings,n=new Date(),m=n.getHours()*60+n.getMinutes(),f=t=>{const[a,b]=t.split(':').map(Number);return a*60+b},a=f(S.quietFrom),b=f(S.quietTo);return a===b?false:(a<b?m>=a&&m<b:m>=a||m<b);}
 function rbMsg(r,j){const v=r.body.split(/\n\s*---\s*\n/).map(x=>x.trim()).filter(Boolean);return v[(j.v||0)%v.length]||r.body;}
+function rbSenderFor(r,j){const l=(r.sender||'').split(',').map(x=>x.trim()).filter(Boolean);return l.length?l[(j.v||0)%l.length]:'';}
+function rbToday(){const d=new Date();return d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0');}
+function rbSentToday(){const t0=rbToday();let n=0;db.robotJobs.forEach(j=>(j.log||[]).forEach(l=>{if(rbDate(new Date(l.t))===t0) n+=l.n;}));return n;}
+function rbQuotaLeft(){const S=db.robotSettings;return S.maxPerDay>0?Math.max(0,S.maxPerDay-rbSentToday()):Infinity;}
 function rbGenerate(){
   const now=new Date(); let ch=false;
   db.robotRules.filter(r=>r.active).forEach(r=>{
@@ -2021,7 +2267,8 @@ function rbGenerate(){
         const [h,m]=t.split(':').map(Number), at=new Date(d.getFullYear(),d.getMonth(),d.getDate(),h,m).getTime();
         const id=r.id+'_'+rbDate(d)+'_'+t.replace(':','');
         if(at<=r.createdAt||at>Date.now()+6e4||db.robotJobs.some(j=>j.id===id)) return;
-        db.robotJobs.push({id,ruleId:r.id,at,status:'todo',v:r.seq||0,updatedAt:Date.now()}); r.seq=(r.seq||0)+1; r.updatedAt=Date.now(); ch=true;
+        const jit=db.robotSettings.jitterMin?Math.round((Math.random()*2-1)*db.robotSettings.jitterMin*60000):0;
+        db.robotJobs.push({id,ruleId:r.id,at:at+jit,status:'todo',v:r.seq||0,updatedAt:Date.now()}); r.seq=(r.seq||0)+1; r.updatedAt=Date.now(); ch=true;
       });
     }
   });
@@ -2068,7 +2315,7 @@ function rbUndo(id){
 function rbAuto(){
   const S=db.robotSettings;
   if(rbAwait&&Date.now()-rbAwaitAt>6e5) rbAwait=null;
-  if(!S.autoOpen||document.hidden||rbAwait||rbQuiet()) return;
+  if(!S.autoOpen||document.hidden||rbAwait||rbQuiet()||rbQuotaLeft()<=0) return;
   const it=rbItems().find(x=>x.c); if(!it||it.j.tried) return;
   it.j.tried=Date.now(); saveDB(); rbAwait=it.j.id; rbAwaitAt=Date.now(); rbHid=false;
   location.href='sms:'+it.c.nums.map(x=>x.replace(/\s+/g,'')).join(',')+'?body='+encodeURIComponent(it.msg);
@@ -2077,20 +2324,22 @@ function setOpts(el,h){ if(el.innerHTML!==h){const v=el.value;el.innerHTML=h;if(
 function renderRobot(){
   rbGenerate(); const S=db.robotSettings, items=rbItems();
   $r('robotDueCount').textContent=items.length;
+  const ql=rbQuotaLeft(), quotaBanner = ql<=0 ? '<div class="batch" style="border-color:#c43e3e;"><b>⏸ Quota quotidien atteint.</b><div class="dim" style="font-size:12px;">L\'ouverture automatique est en pause jusqu\'à demain (protection anti-spam). Vous pouvez toujours envoyer manuellement ci-dessous.</div></div>' : '';
+  $r('robotQuotaInfo').textContent = db.robotSettings.maxPerDay>0 ? `Envoyés aujourd'hui : ${rbSentToday()} / ${db.robotSettings.maxPerDay}` : `Envoyés aujourd'hui : ${rbSentToday()} (illimité)`;
   const el=$r('robotDue');
-  el.innerHTML=items.length?items.map(({j,r,c,err,wait,msg})=>{
+  el.innerHTML=quotaBanner+(items.length?items.map(({j,r,c,err,wait,msg})=>{
     const late=Date.now()-j.at>36e5, hh=new Date(j.at).toLocaleString('fr-FR',{weekday:'short',hour:'2-digit',minute:'2-digit'}), nm=escapeHtml(r.name)+' · '+hh;
     if(wait) return `<div class="batch"><b>${nm}</b><div class="dim" style="font-size:12px;">⏳ En attente de l'envoi précédent de cette base.</div></div>`;
     if(err) return `<div class="batch"><b>${nm}</b><div class="dim">${err}</div><button class="btn btn-secondary btn-small" data-rb-skip="${j.id}">Ignorer</button></div>`;
     const n=c.nums.map(x=>x.replace(/\s+/g,'')), q='?body='+encodeURIComponent(msg);
     return `<div class="batch"><div class="batch-head"><span class="label">${late?'⚠️ ':'🔔 '}${nm}</span><span class="count">${n.length} n°</span></div>
-      ${r.sender?`<div style="font-size:12.5px;color:#C43E71;font-weight:700;">📱 Depuis : ${escapeHtml(r.sender)}</div>`:''}
+      ${rbSenderFor(r,j)?`<div style="font-size:12.5px;color:#C43E71;font-weight:700;">📱 Depuis : ${escapeHtml(rbSenderFor(r,j))}</div>`:''}
       <div style="font-size:12.5px;word-break:break-all;margin:6px 0;">${escapeHtml(n.join(', '))}</div>
       <div class="row"><a class="btn btn-primary" style="text-align:center;text-decoration:none;" data-rb-open="${j.id}" href="sms:${n.join(',')}${q}">Ouvrir SMS</a>
       <button class="btn btn-secondary btn-small" data-rb-ok="${j.id}">✓ Envoyé</button></div>
       <div class="row" style="margin-top:6px;"><a class="btn btn-secondary btn-small" style="text-align:center;text-decoration:none;flex:1;" href="sms:${n.join(';')}${q}">Autre format</a>
       <button class="btn btn-secondary btn-small" data-rb-skip="${j.id}" style="flex:0 0 auto;">Passer</button></div></div>`;
-  }).join(''):'<div class="empty">Rien à envoyer pour le moment.</div>';
+  }).join(''):(quotaBanner?'':'<div class="empty">Rien à envoyer pour le moment.</div>'));
   const J=id=>db.robotJobs.find(x=>x.id===id);
   el.querySelectorAll('[data-rb-open]').forEach(b=>b.onclick=()=>{rbAwait=b.dataset.rbOpen;rbAwaitAt=Date.now();rbHid=false;});
   el.querySelectorAll('[data-rb-ok]').forEach(b=>b.onclick=()=>{const j=J(b.dataset.rbOk),r=j&&db.robotRules.find(x=>x.id===j.ruleId);if(r)rbSent(r,j);});
@@ -2112,7 +2361,7 @@ function renderRobot(){
   rl.querySelectorAll('[data-rb-now]').forEach(b=>b.onclick=()=>{db.robotJobs.push({id:b.dataset.rbNow+'_now_'+Date.now(),ruleId:b.dataset.rbNow,at:Date.now(),status:'todo',v:R(b.dataset.rbNow).seq||0,updatedAt:Date.now()});const r=R(b.dataset.rbNow);r.seq=(r.seq||0)+1;saveDB();renderRobot();rbAuto();});
   rl.querySelectorAll('[data-rb-tog]').forEach(b=>b.onclick=()=>{const r=R(b.dataset.rbTog);r.active=!r.active;r.updatedAt=Date.now();if(r.active)r.createdAt=Date.now();saveDB();renderRobot();});
   rl.querySelectorAll('[data-rb-del]').forEach(b=>b.onclick=()=>{if(!confirm('Supprimer cette règle du robot ?'))return;markDeleted('robotRules',b.dataset.rbDel);db.robotRules=db.robotRules.filter(x=>x.id!==b.dataset.rbDel);db.robotJobs=db.robotJobs.filter(j=>j.ruleId!==b.dataset.rbDel);saveDB();renderRobot();});
-  if(document.activeElement.closest&&!document.activeElement.closest('#rbSettingsBox')){ $r('rsAutoOpen').checked=S.autoOpen;$r('rsAutoConfirm').checked=S.autoConfirm;$r('rsTimes').value=S.times.join(', ');$r('rsQF').value=S.quietFrom;$r('rsQT').value=S.quietTo;$r('rsBatch').value=S.batchSize;
+  if(document.activeElement.closest&&!document.activeElement.closest('#rbSettingsBox')){ $r('rsAutoOpen').checked=S.autoOpen;$r('rsAutoConfirm').checked=S.autoConfirm;$r('rsTimes').value=S.times.join(', ');$r('rsQF').value=S.quietFrom;$r('rsQT').value=S.quietTo;$r('rsBatch').value=S.batchSize;$r('rsMaxDay').value=S.maxPerDay;$r('rsJitter').value=S.jitterMin;
     $r('rsDays').querySelectorAll('input').forEach(i=>i.checked=S.days.includes(+i.value)); }
 }
 const rbDaysHtml=(c)=>[1,2,3,4,5,6,0].map(d=>`<label class="check-row"><input type="checkbox" value="${d}" ${c?'checked':''}> ${RB_DAYS[d]}</label>`).join('');
@@ -2123,6 +2372,7 @@ function rbSaveSettings(){
   S.autoOpen=$r('rsAutoOpen').checked; S.autoConfirm=$r('rsAutoConfirm').checked;
   if(t.length)S.times=t; if(d.length)S.days=d;
   S.quietFrom=$r('rsQF').value||S.quietFrom; S.quietTo=$r('rsQT').value||S.quietTo; S.batchSize=Math.max(1,parseInt($r('rsBatch').value)||15);
+  S.maxPerDay=Math.max(0,parseInt($r('rsMaxDay').value)||0); S.jitterMin=Math.max(0,Math.min(120,parseInt($r('rsJitter').value)||0));
   S.updatedAt=Date.now(); saveDB();
 }
 $r('rsAutoOpen').closest('.card').id='rbSettingsBox';
