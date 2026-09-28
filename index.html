@@ -208,6 +208,7 @@
     <button class="tab-btn" data-tab="email">E-mail</button>
     <button class="tab-btn" data-tab="media">Médias · WhatsApp</button>
     <button class="tab-btn" data-tab="scheduled">Programmés</button>
+    <button class="tab-btn" data-tab="robot">🤖 Robot</button>
     <button class="tab-btn" data-tab="blocked">🚫 Bloqués</button>
   </nav>
 
@@ -620,6 +621,44 @@
   </div>
 
   <!-- ===================== NUMÉROS BLOQUÉS ===================== -->
+  <div class="tabpanel" id="tab-robot">
+    <div class="card">
+      <h2>🤖 À envoyer maintenant (<span id="robotDueCount">0</span>)</h2>
+      <p class="dim" style="font-size:12px;margin:0 0 8px;">Le robot ouvre l'appli SMS avec le lot prêt (app ouverte) : vous n'avez qu'à envoyer, puis revenir. Au retour, le lot est marqué envoyé et le suivant s'ouvre.</p>
+      <div id="robotDue"><div class="empty">Rien à envoyer pour le moment.</div></div>
+    </div>
+    <div class="card"><h2>Derniers envois</h2><div id="robotLog"><div class="empty">Aucun envoi.</div></div></div>
+    <div class="card">
+      <h2>⚙️ Réglages du robot</h2>
+      <label class="check-row"><input type="checkbox" id="rsAutoOpen"> Ouvrir l'appli SMS automatiquement</label>
+      <label class="check-row"><input type="checkbox" id="rsAutoConfirm"> Marquer « envoyé » automatiquement à mon retour</label>
+      <label>Programmation par défaut — jours</label><div class="row" id="rsDays" style="flex-wrap:wrap;gap:4px;"></div>
+      <label>Programmation par défaut — heures</label><input id="rsTimes" placeholder="09:00, 13:00, 18:00">
+      <label>Heures calmes (pas d'ouverture automatique)</label>
+      <div class="row"><input id="rsQF" type="time"><input id="rsQT" type="time"></div>
+      <label>Numéros par lot (par défaut)</label><input id="rsBatch" type="number" min="1">
+    </div>
+    <div class="card">
+      <h2>Programmer le robot</h2>
+      <label>Nom de la règle</label><input id="rbName" placeholder="Ex. Offres emploi du matin">
+      <label>Message (plusieurs messages : séparez-les par une ligne « --- », le robot les alterne)</label><textarea id="rbBody" style="min-height:90px;"></textarea>
+      <label>Destinataires</label>
+      <select id="rbSource"><option value="base">Base de numéros (lot par lot, sans fin)</option><option value="groups">Contacts / groupes</option><option value="numbers">Numéros saisis</option></select>
+      <div id="rbBaseWrap"><select id="rbBase"></select></div>
+      <div id="rbGroupsWrap" style="display:none;"></div>
+      <textarea id="rbNumbers" inputmode="tel" style="display:none;min-height:70px;" placeholder="Un numéro par ligne"></textarea>
+      <label class="check-row" style="margin-top:8px;"><input type="checkbox" id="rbDefSched" checked> Utiliser la programmation par défaut</label>
+      <div id="rbCustom" style="display:none;"><label>Jours</label><div class="row" id="rbDays" style="flex-wrap:wrap;gap:4px;"></div>
+      <label>Heures (séparées par une virgule)</label><input id="rbTimes" value="09:00"></div>
+      <label>Envoyer depuis (facultatif)</label><input id="rbSender" placeholder="Numéro / SIM utilisé">
+      <button class="btn btn-primary" id="rbAddBtn" style="margin-top:10px;">➕ Ajouter au robot</button>
+    </div>
+    <div class="card">
+      <h2>Tableau du robot (<span id="robotCount">0</span>)</h2>
+      <div id="robotRules"><div class="empty">Aucune règle.</div></div>
+    </div>
+  </div>
+
   <div class="tabpanel" id="tab-blocked">
     <div class="hint">
       Un numéro bloqué ici est refusé <strong>partout dans l'app</strong> : impossible de
@@ -719,6 +758,8 @@ let db = loadDB();
 if(!db.scheduled) db.scheduled = [];
 if(!db.phoneBases) db.phoneBases = [];
 if(!db.blockedNumbers) db.blockedNumbers = [];
+if(!db.robotRules) db.robotRules = [];
+if(!db.robotJobs) db.robotJobs = [];
 // "Tombstones" : quand un élément est supprimé, on garde une trace de son id
 // (avec la date de suppression) au lieu de simplement le retirer du tableau.
 // SANS ça, une synchronisation avec un autre téléphone (ou le cloud) qui n'a
@@ -726,7 +767,7 @@ if(!db.blockedNumbers) db.blockedNumbers = [];
 // fusion ne sait qu'additionner les deux côtés. Avec la tombstone, la fusion
 // sait qu'un id supprimé ne doit plus jamais être réintégré.
 if(!db.tombstones) db.tombstones = { contacts:{}, groups:{}, scheduled:{}, phoneBases:{}, blockedNumbers:{} };
-['contacts','groups','scheduled','phoneBases','blockedNumbers'].forEach(k => { if(!db.tombstones[k]) db.tombstones[k] = {}; });
+['contacts','groups','scheduled','phoneBases','blockedNumbers','robotRules'].forEach(k => { if(!db.tombstones[k]) db.tombstones[k] = {}; });
 function markDeleted(kind, id){
   db.tombstones[kind][id] = Date.now();
 }
@@ -890,6 +931,12 @@ function mergeTombstones(localT, remoteT){
 // Fusionne deux tableaux par id : garde tous les éléments des deux côtés,
 // sans doublon, SAUF ceux dont l'id est dans les tombstones (supprimés
 // volontairement d'un côté ou de l'autre — jamais ressuscités).
+// Robot : à id égal, la version la plus récente (updatedAt) l'emporte.
+function mergeNewest(a, b, tomb){
+  const m = new Map();
+  [...(a||[]), ...(b||[])].forEach(x => { if(tomb && tomb[x.id]) return; const o = m.get(x.id); if(!o || (x.updatedAt||0) > (o.updatedAt||0)) m.set(x.id, x); });
+  return Array.from(m.values());
+}
 function mergeById(localArr, remoteArr, tombstones){
   const map = new Map();
   (localArr || []).forEach(item => { if(!tombstones[item.id]) map.set(item.id, item); });
@@ -958,7 +1005,8 @@ function mergeDb(local, remote){
     groups: mergeTombstones(lt.groups, rt.groups),
     scheduled: mergeTombstones(lt.scheduled, rt.scheduled),
     phoneBases: mergeTombstones(lt.phoneBases, rt.phoneBases),
-    blockedNumbers: mergeTombstones(lt.blockedNumbers, rt.blockedNumbers)
+    blockedNumbers: mergeTombstones(lt.blockedNumbers, rt.blockedNumbers),
+    robotRules: mergeTombstones(lt.robotRules, rt.robotRules)
   };
   return {
     contacts: mergeById(local.contacts, remote.contacts, tombstones.contacts),
@@ -966,6 +1014,9 @@ function mergeDb(local, remote){
     scheduled: mergeById(local.scheduled, remote.scheduled, tombstones.scheduled),
     phoneBases: mergePhoneBases(local.phoneBases, remote.phoneBases, tombstones.phoneBases),
     blockedNumbers: mergeById(local.blockedNumbers, remote.blockedNumbers, tombstones.blockedNumbers),
+    robotRules: mergeNewest(local.robotRules, remote.robotRules, tombstones.robotRules),
+    robotSettings: ((remote.robotSettings||{}).updatedAt||0) > ((local.robotSettings||{}).updatedAt||0) ? remote.robotSettings : local.robotSettings,
+    robotJobs: mergeNewest(local.robotJobs, remote.robotJobs).filter(j => j.at > Date.now() - 14*864e5),
     tombstones,
     _syncedAt: Date.now()
   };
@@ -1102,6 +1153,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     if(btn.dataset.tab === 'bases'){ renderBasesList(); refreshBaseSendSelect(); renderCurrentBaseBatch(); }
     if(btn.dataset.tab === 'email') renderRecipientPicker('mailRecipientPicker', 'email');
     if(btn.dataset.tab === 'scheduled'){ renderRecipientPicker('schedRecipientPicker', document.getElementById('schedType').value === 'email' ? 'email' : 'sms'); updateSchedSourceUI(); }
+    if(btn.dataset.tab === 'robot') renderRobot();
     if(btn.dataset.tab === 'blocked') renderBlockedList(document.getElementById('blockedFilterInput').value);
   });
 });
@@ -1948,6 +2000,161 @@ function checkSchedules(){
   if(changed){ saveDB(); if(document.getElementById('tab-scheduled').classList.contains('active')) renderSchedList(); }
 }
 setInterval(checkSchedules, 20000);
+
+
+/* ================= ROBOT D'ENVOI ================= */
+const RB_DAYS=['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'], $r=id=>document.getElementById(id);
+if(!db.robotSettings) db.robotSettings={days:[0,1,2,3,4,5,6],times:['09:00','13:00','18:00'],autoOpen:true,autoConfirm:true,quietFrom:'21:00',quietTo:'07:00',batchSize:15,updatedAt:1};
+let rbAwait=null, rbAwaitAt=0, rbHid=false;
+const rbDate=d=>d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0');
+const rbSched=r=>r.useDefault?db.robotSettings:r;
+function rbQuiet(){const S=db.robotSettings,n=new Date(),m=n.getHours()*60+n.getMinutes(),f=t=>{const[a,b]=t.split(':').map(Number);return a*60+b},a=f(S.quietFrom),b=f(S.quietTo);return a===b?false:(a<b?m>=a&&m<b:m>=a||m<b);}
+function rbMsg(r,j){const v=r.body.split(/\n\s*---\s*\n/).map(x=>x.trim()).filter(Boolean);return v[(j.v||0)%v.length]||r.body;}
+function rbGenerate(){
+  const now=new Date(); let ch=false;
+  db.robotRules.filter(r=>r.active).forEach(r=>{
+    const sc=rbSched(r);
+    for(let back=1;back>=0;back--){
+      const d=new Date(now.getFullYear(),now.getMonth(),now.getDate()-back);
+      if(!sc.days.includes(d.getDay())) continue;
+      sc.times.forEach(t=>{
+        const [h,m]=t.split(':').map(Number), at=new Date(d.getFullYear(),d.getMonth(),d.getDate(),h,m).getTime();
+        const id=r.id+'_'+rbDate(d)+'_'+t.replace(':','');
+        if(at<=r.createdAt||at>Date.now()+6e4||db.robotJobs.some(j=>j.id===id)) return;
+        db.robotJobs.push({id,ruleId:r.id,at,status:'todo',v:r.seq||0,updatedAt:Date.now()}); r.seq=(r.seq||0)+1; r.updatedAt=Date.now(); ch=true;
+      });
+    }
+  });
+  const cut=Date.now()-14*864e5, n=db.robotJobs.length;
+  db.robotJobs=db.robotJobs.filter(j=>j.at>cut);
+  if(ch||n!==db.robotJobs.length) saveDB();
+  return ch;
+}
+function rbList(r){
+  const bl=new Set(db.blockedNumbers.map(b=>b.number)), ids=r.groupIds||[];
+  const l=r.source==='numbers'?r.numbers:db.contacts.filter(c=>c.phone&&(ids.includes('all')||ids.includes(c.group))).map(c=>c.phone);
+  return l.filter(n=>!bl.has(n.replace(/\s+/g,'')));
+}
+function rbBatch(r,j){
+  if(r.source==='base'){
+    const b=db.phoneBases.find(x=>x.id===r.baseId); if(!b) return {err:'Base supprimée.'};
+    stripBlockedFromBase(b); if(!b.numbers.length) return {err:'Base vide.'};
+    if(b.cursor>=b.numbers.length){b.cursor=0;b.updatedAt=Date.now();} // fin de base : on recommence
+    return {nums:b.numbers.slice(b.cursor,b.cursor+r.batchSize),base:b,start:b.cursor};
+  }
+  const all=rbList(r), st=j.idx||0;
+  return st>=all.length?{err:'Aucun destinataire.'}:{nums:all.slice(st,st+r.batchSize),total:all.length,start:st};
+}
+function rbItems(){
+  const seen=new Set();
+  return db.robotJobs.filter(j=>j.status==='todo').sort((a,b)=>a.at-b.at).map(j=>{
+    const r=db.robotRules.find(x=>x.id===j.ruleId); if(!r) return null;
+    if(r.source==='base'){ if(seen.has(r.baseId)) return {j,r,wait:1}; seen.add(r.baseId); }
+    const c=rbBatch(r,j); return c.err?{j,r,err:c.err}:{j,r,c,msg:rbMsg(r,j)};
+  }).filter(Boolean);
+}
+function rbSent(r,j){
+  const c=rbBatch(r,j); if(c.err) return;
+  (j.log=j.log||[]).push({t:Date.now(),n:c.nums.length,from:c.start});
+  if(c.base){c.base.cursor+=c.nums.length;c.base.updatedAt=Date.now();j.status='done';}
+  else{j.idx=(j.idx||0)+c.nums.length;if(j.idx>=c.total)j.status='done';}
+  j.tried=0; j.updatedAt=Date.now(); saveDB(); renderRobot();
+}
+function rbUndo(id){
+  const j=db.robotJobs.find(x=>x.id===id), r=j&&db.robotRules.find(x=>x.id===j.ruleId), l=j&&j.log&&j.log.pop(); if(!l||!r) return;
+  if(r.source==='base'){const b=db.phoneBases.find(x=>x.id===r.baseId);if(b){b.cursor=l.from;b.updatedAt=Date.now();}} else j.idx=l.from;
+  j.status='todo'; j.tried=0; j.updatedAt=Date.now(); saveDB(); renderRobot();
+}
+function rbAuto(){
+  const S=db.robotSettings;
+  if(rbAwait&&Date.now()-rbAwaitAt>6e5) rbAwait=null;
+  if(!S.autoOpen||document.hidden||rbAwait||rbQuiet()) return;
+  const it=rbItems().find(x=>x.c); if(!it||it.j.tried) return;
+  it.j.tried=Date.now(); saveDB(); rbAwait=it.j.id; rbAwaitAt=Date.now(); rbHid=false;
+  location.href='sms:'+it.c.nums.map(x=>x.replace(/\s+/g,'')).join(',')+'?body='+encodeURIComponent(it.msg);
+}
+function setOpts(el,h){ if(el.innerHTML!==h){const v=el.value;el.innerHTML=h;if([...el.options].some(o=>o.value===v))el.value=v;} }
+function renderRobot(){
+  rbGenerate(); const S=db.robotSettings, items=rbItems();
+  $r('robotDueCount').textContent=items.length;
+  const el=$r('robotDue');
+  el.innerHTML=items.length?items.map(({j,r,c,err,wait,msg})=>{
+    const late=Date.now()-j.at>36e5, hh=new Date(j.at).toLocaleString('fr-FR',{weekday:'short',hour:'2-digit',minute:'2-digit'}), nm=escapeHtml(r.name)+' · '+hh;
+    if(wait) return `<div class="batch"><b>${nm}</b><div class="dim" style="font-size:12px;">⏳ En attente de l'envoi précédent de cette base.</div></div>`;
+    if(err) return `<div class="batch"><b>${nm}</b><div class="dim">${err}</div><button class="btn btn-secondary btn-small" data-rb-skip="${j.id}">Ignorer</button></div>`;
+    const n=c.nums.map(x=>x.replace(/\s+/g,'')), q='?body='+encodeURIComponent(msg);
+    return `<div class="batch"><div class="batch-head"><span class="label">${late?'⚠️ ':'🔔 '}${nm}</span><span class="count">${n.length} n°</span></div>
+      ${r.sender?`<div style="font-size:12.5px;color:#C43E71;font-weight:700;">📱 Depuis : ${escapeHtml(r.sender)}</div>`:''}
+      <div style="font-size:12.5px;word-break:break-all;margin:6px 0;">${escapeHtml(n.join(', '))}</div>
+      <div class="row"><a class="btn btn-primary" style="text-align:center;text-decoration:none;" data-rb-open="${j.id}" href="sms:${n.join(',')}${q}">Ouvrir SMS</a>
+      <button class="btn btn-secondary btn-small" data-rb-ok="${j.id}">✓ Envoyé</button></div>
+      <div class="row" style="margin-top:6px;"><a class="btn btn-secondary btn-small" style="text-align:center;text-decoration:none;flex:1;" href="sms:${n.join(';')}${q}">Autre format</a>
+      <button class="btn btn-secondary btn-small" data-rb-skip="${j.id}" style="flex:0 0 auto;">Passer</button></div></div>`;
+  }).join(''):'<div class="empty">Rien à envoyer pour le moment.</div>';
+  const J=id=>db.robotJobs.find(x=>x.id===id);
+  el.querySelectorAll('[data-rb-open]').forEach(b=>b.onclick=()=>{rbAwait=b.dataset.rbOpen;rbAwaitAt=Date.now();rbHid=false;});
+  el.querySelectorAll('[data-rb-ok]').forEach(b=>b.onclick=()=>{const j=J(b.dataset.rbOk),r=j&&db.robotRules.find(x=>x.id===j.ruleId);if(r)rbSent(r,j);});
+  el.querySelectorAll('[data-rb-skip]').forEach(b=>b.onclick=()=>{const j=J(b.dataset.rbSkip);if(j){j.status='skipped';j.updatedAt=Date.now();saveDB();renderRobot();}});
+  const logs=db.robotJobs.flatMap(j=>(j.log||[]).map(l=>({j,l}))).sort((a,b)=>b.l.t-a.l.t).slice(0,8);
+  $r('robotLog').innerHTML=logs.length?logs.map(({j,l},i)=>{const r=db.robotRules.find(x=>x.id===j.ruleId)||{name:'?'};
+    return `<div class="group-item"><div class="meta">${new Date(l.t).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})} · ${escapeHtml(r.name)} · ${l.n} numéros ${i===0?`<button class="btn btn-secondary btn-small" data-rb-undo="${j.id}">↩ Annuler</button>`:''}</div></div>`;}).join(''):'<div class="empty">Aucun envoi.</div>';
+  $r('robotLog').querySelectorAll('[data-rb-undo]').forEach(b=>b.onclick=()=>rbUndo(b.dataset.rbUndo));
+  $r('robotCount').textContent=db.robotRules.length;
+  setOpts($r('rbBase'),db.phoneBases.map(b=>`<option value="${b.id}">${escapeHtml(b.name)} (${b.numbers.length} n°)</option>`).join(''));
+  const gw=$r('rbGroupsWrap'), gh=[{id:'all',name:'Tous les contacts'},...db.groups].map(g=>`<label class="check-row"><input type="checkbox" value="${g.id}"> ${escapeHtml(g.name)}</label>`).join('');
+  if(gw.dataset.h!==gh){const on=[...gw.querySelectorAll('input:checked')].map(i=>i.value);gw.innerHTML=gh;gw.dataset.h=gh;gw.querySelectorAll('input').forEach(i=>i.checked=on.includes(i.value));}
+  const rl=$r('robotRules');
+  rl.innerHTML=db.robotRules.length?db.robotRules.map(r=>{const sc=rbSched(r);return `<div class="group-item"><div class="name">${r.active?'🟢':'⏸'} ${escapeHtml(r.name)}</div>
+    <div class="meta">${r.useDefault?'Par défaut · ':''}${sc.days.map(d=>RB_DAYS[d]).join(' ')} · ${sc.times.join(', ')}</div>
+    <div class="meta">${r.source==='base'?'Base « '+escapeHtml((db.phoneBases.find(b=>b.id===r.baseId)||{}).name||'?')+' » (en boucle)':r.source==='groups'?'Contacts / groupes':r.numbers.length+' numéros'} · lots de ${r.batchSize} · ${escapeHtml(r.body.slice(0,60))}</div>
+    <div class="row" style="margin-top:6px;gap:6px;flex-wrap:wrap;"><button class="btn btn-primary btn-small" data-rb-now="${r.id}">▶ Lancer maintenant</button><button class="btn btn-secondary btn-small" data-rb-tog="${r.id}">${r.active?'Pause':'Réactiver'}</button><button class="btn btn-danger btn-small" data-rb-del="${r.id}">Supprimer</button></div></div>`;}).join(''):'<div class="empty">Aucune règle.</div>';
+  const R=id=>db.robotRules.find(x=>x.id===id);
+  rl.querySelectorAll('[data-rb-now]').forEach(b=>b.onclick=()=>{db.robotJobs.push({id:b.dataset.rbNow+'_now_'+Date.now(),ruleId:b.dataset.rbNow,at:Date.now(),status:'todo',v:R(b.dataset.rbNow).seq||0,updatedAt:Date.now()});const r=R(b.dataset.rbNow);r.seq=(r.seq||0)+1;saveDB();renderRobot();rbAuto();});
+  rl.querySelectorAll('[data-rb-tog]').forEach(b=>b.onclick=()=>{const r=R(b.dataset.rbTog);r.active=!r.active;r.updatedAt=Date.now();if(r.active)r.createdAt=Date.now();saveDB();renderRobot();});
+  rl.querySelectorAll('[data-rb-del]').forEach(b=>b.onclick=()=>{if(!confirm('Supprimer cette règle du robot ?'))return;markDeleted('robotRules',b.dataset.rbDel);db.robotRules=db.robotRules.filter(x=>x.id!==b.dataset.rbDel);db.robotJobs=db.robotJobs.filter(j=>j.ruleId!==b.dataset.rbDel);saveDB();renderRobot();});
+  if(document.activeElement.closest&&!document.activeElement.closest('#rbSettingsBox')){ $r('rsAutoOpen').checked=S.autoOpen;$r('rsAutoConfirm').checked=S.autoConfirm;$r('rsTimes').value=S.times.join(', ');$r('rsQF').value=S.quietFrom;$r('rsQT').value=S.quietTo;$r('rsBatch').value=S.batchSize;
+    $r('rsDays').querySelectorAll('input').forEach(i=>i.checked=S.days.includes(+i.value)); }
+}
+const rbDaysHtml=(c)=>[1,2,3,4,5,6,0].map(d=>`<label class="check-row"><input type="checkbox" value="${d}" ${c?'checked':''}> ${RB_DAYS[d]}</label>`).join('');
+$r('rbDays').innerHTML=rbDaysHtml(true); $r('rsDays').innerHTML=rbDaysHtml(false);
+const rbTimesOf=v=>[...new Set(v.split(/[,;\s]+/).filter(t=>/^\d{1,2}:\d{2}$/.test(t)).map(t=>t.padStart(5,'0')))].sort();
+function rbSaveSettings(){
+  const S=db.robotSettings, t=rbTimesOf($r('rsTimes').value), d=[...$r('rsDays').querySelectorAll('input:checked')].map(i=>+i.value);
+  S.autoOpen=$r('rsAutoOpen').checked; S.autoConfirm=$r('rsAutoConfirm').checked;
+  if(t.length)S.times=t; if(d.length)S.days=d;
+  S.quietFrom=$r('rsQF').value||S.quietFrom; S.quietTo=$r('rsQT').value||S.quietTo; S.batchSize=Math.max(1,parseInt($r('rsBatch').value)||15);
+  S.updatedAt=Date.now(); saveDB();
+}
+$r('rsAutoOpen').closest('.card').id='rbSettingsBox';
+$r('rbSettingsBox').addEventListener('change',rbSaveSettings);
+$r('rbSource').onchange=e=>{const v=e.target.value;$r('rbBaseWrap').style.display=v==='base'?'block':'none';$r('rbGroupsWrap').style.display=v==='groups'?'block':'none';$r('rbNumbers').style.display=v==='numbers'?'block':'none';};
+$r('rbDefSched').onchange=e=>{$r('rbCustom').style.display=e.target.checked?'none':'block';};
+$r('rbAddBtn').onclick=()=>{
+  const name=$r('rbName').value.trim(), body=$r('rbBody').value.trim(), source=$r('rbSource').value, useDefault=$r('rbDefSched').checked;
+  const times=rbTimesOf($r('rbTimes').value), days=[...$r('rbDays').querySelectorAll('input:checked')].map(i=>+i.value);
+  const numbers=$r('rbNumbers').value.split(/[\n,;]+/).map(x=>x.trim()).filter(Boolean), groupIds=[...$r('rbGroupsWrap').querySelectorAll('input:checked')].map(i=>i.value);
+  if(!name||!body) return alert('Donnez un nom et un message.');
+  if(!useDefault&&(!times.length||!days.length)) return alert('Choisissez au moins un jour et une heure valide (ex. 09:00).');
+  if(source==='base'&&!$r('rbBase').value) return alert('Choisissez une base.');
+  if(source==='groups'&&!groupIds.length) return alert('Cochez au moins un groupe.');
+  if(source==='numbers'&&!numbers.length) return alert('Saisissez au moins un numéro.');
+  db.robotRules.push({id:'r'+Date.now(),name,body,source,baseId:$r('rbBase').value,groupIds,numbers,batchSize:db.robotSettings.batchSize,useDefault,days,times,sender:$r('rbSender').value.trim(),active:true,createdAt:Date.now(),updatedAt:Date.now(),seq:0});
+  saveDB(); $r('rbName').value=''; $r('rbBody').value=''; renderRobot();
+};
+function rbTick(){
+  const ch=rbGenerate();
+  if(ch&&!rbQuiet()){ if('Notification' in window&&Notification.permission==='granted') new Notification('🤖 SHAMAN PRODUCTION',{body:'Un envoi de SMS est prêt.'}); if(navigator.vibrate) navigator.vibrate([300,150,300]); }
+  if($r('tab-robot').classList.contains('active')) renderRobot();
+  rbAuto();
+}
+setInterval(rbTick,20000);
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden){ if(rbAwait) rbHid=true; return; }
+  if(rbAwait&&rbHid){ const j=db.robotJobs.find(x=>x.id===rbAwait), r=j&&db.robotRules.find(x=>x.id===j.ruleId); rbAwait=null; rbHid=false;
+    if(j&&r&&j.status==='todo'&&db.robotSettings.autoConfirm) rbSent(r,j); }
+  setTimeout(rbTick,1500);
+});
+rbTick();
 
 /* ================= BASES DE NUMÉROS ================= */
 // Numbers-only lists (no name needed), independent from the Contacts.
