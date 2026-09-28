@@ -667,7 +667,7 @@
     <div class="card">
       <h2>📷 Scanner de numéros</h2>
       <p class="dim" style="font-size:12px;">Photographiez ou importez une image (document, liste manuscrite, capture d'écran, carte de visite…). L'app détecte les numéros de téléphone et reconnaît l'indicatif du pays, y compris quand l'écriture est floue ou difficile à lire.</p>
-      <input type="file" id="scanFiles" accept="image/*" multiple capture="environment" style="margin-bottom:8px;">
+      <input type="file" id="scanFiles" accept="image/*" multiple style="margin-bottom:8px;">
       <button class="btn btn-primary" id="scanRunBtn">🔍 Analyser</button>
       <div id="scanProgress" class="dim" style="font-size:12.5px;margin-top:8px;"></div>
     </div>
@@ -2124,31 +2124,76 @@ function scanExtractCandidates(text){
   });
   return out;
 }
+// Découpe une LIGNE HORIZONTALE détectée (bbox Tesseract) dans une image à
+// part, agrandie, pour un second passage OCR ciblé rien que sur cette ligne.
+function scanCropLine(canvas, bbox){
+  const pad = Math.round((bbox.y1 - bbox.y0) * 0.35) + 4;
+  const x0 = Math.max(0, bbox.x0 - pad*2), y0 = Math.max(0, bbox.y0 - pad);
+  const w = Math.min(canvas.width - x0, (bbox.x1 - bbox.x0) + pad*4);
+  const h = Math.min(canvas.height - y0, (bbox.y1 - bbox.y0) + pad*2);
+  if(w <= 0 || h <= 0) return null;
+  const targetH = 90, scale = Math.max(1, targetH / h);
+  const out = document.createElement('canvas');
+  out.width = Math.round(w * scale); out.height = Math.round(h * scale);
+  const ctx = out.getContext('2d');
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(canvas, x0, y0, w, h, 0, 0, out.width, out.height);
+  return out;
+}
+// Une ligne "ressemble à un numéro" si elle contient assez de chiffres, ou de
+// lettres facilement confondues avec des chiffres par l'OCR sur de l'écriture
+// manuscrite (0/O, 1/I/l, 5/S…) — condition volontairement large : le second
+// passage (chiffres uniquement) corrige ensuite la lecture précise.
+function scanLineLooksLikeNumber(text){
+  const t = (text || '').replace(/[^\dOolISZGgBbAaQq]/g, '');
+  return t.length >= 6;
+}
 async function scanRun(){
   const files = Array.from(document.getElementById('scanFiles').files || []);
   if(!files.length){ alert('Choisissez ou prenez au moins une photo.'); return; }
   const prog = document.getElementById('scanProgress');
   const btn = document.getElementById('scanRunBtn');
   btn.disabled = true; prog.textContent = 'Chargement du moteur de reconnaissance…';
+  let worker = null;
   try{
     await scanLoadTesseract();
+    worker = await Tesseract.createWorker('eng');
     let all = [];
     for(let i = 0; i < files.length; i++){
       prog.textContent = `Analyse image ${i+1}/${files.length}…`;
       const img = await scanFileToImage(files[i]);
       const canvas = scanPreprocess(img);
-      const res = await Tesseract.recognize(canvas, 'eng', {
-        logger: m => { if(m.status === 'recognizing text') prog.textContent = `Analyse image ${i+1}/${files.length}… ${Math.round((m.progress||0)*100)}%`; }
-      });
-      all = all.concat(scanExtractCandidates(res.data.text || ''));
+
+      // Passage 1 : lecture normale de l'image entière, ligne par ligne
+      // (chaque ligne horizontale du papier = une ligne détectée par l'OCR).
+      await worker.setParameters({ tessedit_char_whitelist: '', tessedit_pageseg_mode: '6' });
+      const res1 = await worker.recognize(canvas);
+      all = all.concat(scanExtractCandidates(res1.data.text || ''));
+
+      const lines = (res1.data.lines || []).filter(l => scanLineLooksLikeNumber(l.text));
+      let done = 0;
+      for(const line of lines){
+        prog.textContent = `Analyse image ${i+1}/${files.length}… ligne ${++done}/${lines.length}`;
+        const crop = scanCropLine(canvas, line.bbox);
+        if(!crop) continue;
+        // Passage 2 : la MÊME ligne horizontale, agrandie, relue en forçant
+        // uniquement des chiffres — bien plus précis pour un numéro manuscrit
+        // que la lecture générale du passage 1.
+        await worker.setParameters({ tessedit_char_whitelist: '0123456789+', tessedit_pageseg_mode: '7' });
+        const res2 = await worker.recognize(crop);
+        all = all.concat(scanExtractCandidates(res2.data.text || ''));
+      }
       URL.revokeObjectURL(img.src);
     }
     const seen = new Set(); scanCandidates = all.filter(c => !seen.has(c.value) && seen.add(c.value));
-    prog.textContent = scanCandidates.length ? `${scanCandidates.length} numéro(s) détecté(s). Vérifiez la liste ci-dessous.` : "Aucun numéro détecté dans ces images. Essayez une photo plus nette ou mieux cadrée.";
+    prog.textContent = scanCandidates.length ? `${scanCandidates.length} numéro(s) détecté(s). Vérifiez la liste ci-dessous.` : "Aucun numéro détecté dans ces images. Essayez une photo plus nette, mieux cadrée, avec chaque numéro bien sur sa ligne.";
     scanRenderList();
   } catch(e){
     prog.textContent = ''; alert('Erreur pendant la reconnaissance : ' + (e && e.message ? e.message : e));
-  } finally { btn.disabled = false; }
+  } finally {
+    if(worker) await worker.terminate();
+    btn.disabled = false;
+  }
 }
 function scanRenderList(){
   const card = document.getElementById('scanResultsCard');
