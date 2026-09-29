@@ -801,6 +801,7 @@ if(!db.phoneBases) db.phoneBases = [];
 if(!db.blockedNumbers) db.blockedNumbers = [];
 if(!db.robotRules) db.robotRules = [];
 if(!db.robotJobs) db.robotJobs = [];
+if(!db.scanSettings) db.scanSettings = { visionApiKey: '', updatedAt: 1 };
 // "Tombstones" : quand un élément est supprimé, on garde une trace de son id
 // (avec la date de suppression) au lieu de simplement le retirer du tableau.
 // SANS ça, une synchronisation avec un autre téléphone (ou le cloud) qui n'a
@@ -2371,7 +2372,6 @@ document.getElementById('scanSaveBtn').addEventListener('click', () => {
 /* ================= ROBOT D'ENVOI ================= */
 const RB_DAYS=['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'], $r=id=>document.getElementById(id);
 const RB_DEFAULT_TIMES=Array.from({length:13},(_,i)=>String(8+i).padStart(2,'0')+':00'); // 08:00..20:00
-if(!db.scanSettings) db.scanSettings={visionApiKey:'',updatedAt:1};
 if(!db.robotSettings) db.robotSettings={days:[0,1,2,3,4,5,6],times:RB_DEFAULT_TIMES,autoOpen:true,autoConfirm:true,quietFrom:'21:00',quietTo:'07:00',batchSize:15,maxPerDay:0,jitterMin:0,updatedAt:1};
 if(!db.robotSettings.maxPerDay) db.robotSettings.maxPerDay = db.robotSettings.maxPerDay||0;
 if(db.robotSettings.jitterMin===undefined) db.robotSettings.jitterMin=0;
