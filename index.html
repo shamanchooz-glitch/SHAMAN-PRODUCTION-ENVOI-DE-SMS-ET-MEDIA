@@ -674,9 +674,17 @@
       <input type="file" id="scanFilesCam" accept="image/*" capture="environment" style="display:none;">
       <input type="file" id="scanFilesGal" accept="image/*" multiple style="display:none;">
       <div id="scanFilesInfo" class="dim" style="font-size:12px;margin-bottom:8px;">Aucune image sélectionnée.</div>
-      <details style="margin-bottom:8px;">
+      <details style="margin-bottom:8px;" open>
         <summary style="font-weight:600;font-size:13px;cursor:pointer;">🔑 Reconnaissance avancée de l'écriture manuscrite (recommandé)</summary>
-        <p class="dim" style="font-size:12px;">Le moteur gratuit intégré (Tesseract) lit mal l'écriture cursive/manuscrite. Pour une reconnaissance beaucoup plus fiable sur vos fiches manuscrites, collez ici une clé <b>Google Cloud Vision</b> (gratuite jusqu'à 1000 images/mois) : <a href="https://console.cloud.google.com/apis/library/vision.googleapis.com" target="_blank" rel="noopener">activer l'API ici</a>, créez une clé API, puis restreignez-la (onglet Identifiants → Restrictions de l'application → "Référents HTTP") à l'adresse de cette app pour la sécuriser. Sans clé, l'app utilise automatiquement le moteur gratuit (moins précis).</p>
+        <p class="dim" style="font-size:12px;">Le moteur gratuit intégré (Tesseract) lit mal l'écriture cursive/manuscrite. Renseignez UNE des clés ci-dessous pour une reconnaissance bien plus fiable — l'app utilise la première configurée, dans cet ordre : Groq → Google Vision → OCR.space → Tesseract (repli automatique, sans clé).</p>
+
+        <p class="dim" style="font-size:12px;margin-bottom:2px;"><b>① Groq (recommandé — gratuit, sans carte bancaire)</b> : IA de lecture d'image de dernière génération, efficace sur l'écriture manuscrite. Créez un compte gratuit sur <a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com/keys</a> (email ou Google, aucune carte demandée), copiez la clé générée.</p>
+        <input type="password" id="scanGroqKey" placeholder="Clé API Groq (facultatif)">
+
+        <p class="dim" style="font-size:12px;margin:8px 0 2px;"><b>② OCR.space (gratuit, sans carte bancaire)</b> : moteur OCR classique en secours. Clé gratuite immédiate sur <a href="https://ocr.space/ocrapi/freekey" target="_blank" rel="noopener">ocr.space/ocrapi/freekey</a> (email uniquement).</p>
+        <input type="password" id="scanOcrSpaceKey" placeholder="Clé API OCR.space (facultatif)">
+
+        <p class="dim" style="font-size:12px;margin:8px 0 2px;"><b>③ Google Cloud Vision</b> : très précis mais nécessite une vraie carte bancaire (pas prépayée) pour l'activer.</p>
         <input type="password" id="scanVisionKey" placeholder="Clé API Google Cloud Vision (facultatif)">
       </details>
       <button class="btn btn-primary" id="scanRunBtn">🔍 Analyser</button>
@@ -801,7 +809,7 @@ if(!db.phoneBases) db.phoneBases = [];
 if(!db.blockedNumbers) db.blockedNumbers = [];
 if(!db.robotRules) db.robotRules = [];
 if(!db.robotJobs) db.robotJobs = [];
-if(!db.scanSettings) db.scanSettings = { visionApiKey: '', updatedAt: 1 };
+if(!db.scanSettings) db.scanSettings = { visionApiKey: '', groqApiKey: '', ocrSpaceApiKey: '', updatedAt: 1 };
 // "Tombstones" : quand un élément est supprimé, on garde une trace de son id
 // (avec la date de suppression) au lieu de simplement le retirer du tableau.
 // SANS ça, une synchronisation avec un autre téléphone (ou le cloud) qui n'a
@@ -2058,10 +2066,14 @@ function scanUpdateFilesInfo(){
   if(clr) clr.addEventListener('click', (e) => { e.preventDefault(); scanFileList = []; scanUpdateFilesInfo(); });
 }
 document.getElementById('scanVisionKey').value = db.scanSettings.visionApiKey || '';
-document.getElementById('scanVisionKey').addEventListener('change', (e) => {
-  db.scanSettings.visionApiKey = e.target.value.trim();
-  db.scanSettings.updatedAt = Date.now();
-  saveDB();
+document.getElementById('scanGroqKey').value = db.scanSettings.groqApiKey || '';
+document.getElementById('scanOcrSpaceKey').value = db.scanSettings.ocrSpaceApiKey || '';
+[['scanVisionKey','visionApiKey'], ['scanGroqKey','groqApiKey'], ['scanOcrSpaceKey','ocrSpaceApiKey']].forEach(([id, field]) => {
+  document.getElementById(id).addEventListener('change', (e) => {
+    db.scanSettings[field] = e.target.value.trim();
+    db.scanSettings.updatedAt = Date.now();
+    saveDB();
+  });
 });
 // Image redimensionnée (sans seuillage) en base64, pour l'API Vision qui
 // fait déjà son propre traitement d'image en interne.
@@ -2084,6 +2096,46 @@ function scanFileToBase64(file, maxW){
 // disponible pour l'écriture manuscrite. Le texte renvoyé respecte les
 // lignes réellement détectées dans l'image (une ligne horizontale du papier
 // = une ligne du texte renvoyé), ce qui correspond exactement au besoin.
+// Groq — modèle Qwen multimodal (lecture d'image + raisonnement), gratuit,
+// sans carte bancaire. On lui demande directement les numéros de téléphone
+// plutôt qu'un texte brut : une IA de lecture "comprend" une écriture
+// manuscrite ambiguë bien mieux qu'un OCR classique, en déduisant les
+// chiffres probables du contexte comme le ferait un humain.
+async function scanGroqOCR(base64, apiKey){
+  const prompt = "Tu es un système de reconnaissance optique spécialisé dans les numéros de téléphone manuscrits ou imprimés. Lis attentivement cette image (fiche, liste de contacts, document). Pour CHAQUE numéro de téléphone visible sur l'image, écris-le sur sa propre ligne : uniquement des chiffres (garde un + au début si un indicatif pays est visible), sans espace, sans texte autour, sans numérotation ni explication. Ignore tout ce qui n'est pas un numéro de téléphone (noms, dates, notes). Si l'écriture est difficile à lire, donne ta meilleure estimation chiffre par chiffre plutôt que d'ignorer le numéro. Ne réponds RIEN d'autre que la liste de numéros, un par ligne. S'il n'y a aucun numéro, réponds une ligne vide.";
+  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
+    body: JSON.stringify({
+      model: 'qwen/qwen3.8-27b',
+      temperature: 0,
+      max_tokens: 1024,
+      messages: [{ role: 'user', content: [
+        { type: 'text', text: prompt },
+        { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + base64 } }
+      ]}]
+    })
+  });
+  const data = await res.json();
+  if(data.error) throw new Error(data.error.message || 'Erreur Groq');
+  return (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
+}
+// OCR.space — moteur OCR classique gratuit, sans carte bancaire, en second
+// recours (moins précis que Groq/Vision sur l'écriture manuscrite, mais
+// meilleur que Tesseract seul sur des photos nettes).
+async function scanOcrSpaceOCR(base64, apiKey){
+  const body = new URLSearchParams();
+  body.append('apikey', apiKey);
+  body.append('base64Image', 'data:image/jpeg;base64,' + base64);
+  body.append('language', 'fre');
+  body.append('OCREngine', '2');
+  body.append('scale', 'true');
+  body.append('isOverlayRequired', 'false');
+  const res = await fetch('https://api.ocr.space/parse/image', { method: 'POST', body });
+  const data = await res.json();
+  if(data.IsErroredOnProcessing) throw new Error((data.ErrorMessage && data.ErrorMessage.join(' ')) || 'Erreur OCR.space');
+  return (data.ParsedResults && data.ParsedResults[0] && data.ParsedResults[0].ParsedText) || '';
+}
 async function scanVisionOCR(base64, apiKey){
   const res = await fetch(`https://vision.googleapis.com/v1/images:annotate?key=${encodeURIComponent(apiKey)}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -2221,20 +2273,24 @@ async function scanRun(){
   if(!files.length){ alert('Prenez une photo ou choisissez au moins une image.'); return; }
   const prog = document.getElementById('scanProgress');
   const btn = document.getElementById('scanRunBtn');
+  const groqKey = (db.scanSettings.groqApiKey || '').trim();
   const visionKey = (db.scanSettings.visionApiKey || '').trim();
+  const ocrSpaceKey = (db.scanSettings.ocrSpaceApiKey || '').trim();
+  // Ordre de priorité : Groq (IA, gratuit, sans carte) → Google Vision (si
+  // configuré) → OCR.space (gratuit, sans carte) → Tesseract (repli local).
+  const engine = groqKey ? 'groq' : visionKey ? 'vision' : ocrSpaceKey ? 'ocrspace' : 'tesseract';
   btn.disabled = true; prog.textContent = 'Chargement du moteur de reconnaissance…';
   let worker = null;
   try{
     let all = [];
-    if(visionKey){
-      // Moteur Google Cloud Vision (dernière génération, bien meilleur sur
-      // l'écriture manuscrite) — une ligne détectée dans l'image = une ligne
-      // dans le texte renvoyé, donc on extrait numéro par numéro, ligne par
-      // ligne horizontale.
+    if(engine === 'groq' || engine === 'vision' || engine === 'ocrspace'){
+      const label = { groq: 'Groq', vision: 'Google Vision', ocrspace: 'OCR.space' }[engine];
       for(let i = 0; i < files.length; i++){
-        prog.textContent = `Analyse image ${i+1}/${files.length} (Google Vision)…`;
+        prog.textContent = `Analyse image ${i+1}/${files.length} (${label})…`;
         const base64 = await scanFileToBase64(files[i], 1800);
-        const text = await scanVisionOCR(base64, visionKey);
+        const text = engine === 'groq' ? await scanGroqOCR(base64, groqKey)
+          : engine === 'vision' ? await scanVisionOCR(base64, visionKey)
+          : await scanOcrSpaceOCR(base64, ocrSpaceKey);
         text.split('\n').forEach(line => { all = all.concat(scanExtractCandidates(line)); });
       }
     } else {
