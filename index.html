@@ -674,6 +674,11 @@
       <input type="file" id="scanFilesCam" accept="image/*" capture="environment" style="display:none;">
       <input type="file" id="scanFilesGal" accept="image/*" multiple style="display:none;">
       <div id="scanFilesInfo" class="dim" style="font-size:12px;margin-bottom:8px;">Aucune image sélectionnée.</div>
+      <details style="margin-bottom:8px;">
+        <summary style="font-weight:600;font-size:13px;cursor:pointer;">🔑 Reconnaissance avancée de l'écriture manuscrite (recommandé)</summary>
+        <p class="dim" style="font-size:12px;">Le moteur gratuit intégré (Tesseract) lit mal l'écriture cursive/manuscrite. Pour une reconnaissance beaucoup plus fiable sur vos fiches manuscrites, collez ici une clé <b>Google Cloud Vision</b> (gratuite jusqu'à 1000 images/mois) : <a href="https://console.cloud.google.com/apis/library/vision.googleapis.com" target="_blank" rel="noopener">activer l'API ici</a>, créez une clé API, puis restreignez-la (onglet Identifiants → Restrictions de l'application → "Référents HTTP") à l'adresse de cette app pour la sécuriser. Sans clé, l'app utilise automatiquement le moteur gratuit (moins précis).</p>
+        <input type="password" id="scanVisionKey" placeholder="Clé API Google Cloud Vision (facultatif)">
+      </details>
       <button class="btn btn-primary" id="scanRunBtn">🔍 Analyser</button>
       <div id="scanProgress" class="dim" style="font-size:12.5px;margin-top:8px;"></div>
     </div>
@@ -1052,6 +1057,7 @@ function mergeDb(local, remote){
     blockedNumbers: mergeById(local.blockedNumbers, remote.blockedNumbers, tombstones.blockedNumbers),
     robotRules: mergeNewest(local.robotRules, remote.robotRules, tombstones.robotRules),
     robotSettings: ((remote.robotSettings||{}).updatedAt||0) > ((local.robotSettings||{}).updatedAt||0) ? remote.robotSettings : local.robotSettings,
+    scanSettings: ((remote.scanSettings||{}).updatedAt||0) > ((local.scanSettings||{}).updatedAt||0) ? remote.scanSettings : local.scanSettings,
     robotJobs: mergeNewest(local.robotJobs, remote.robotJobs).filter(j => j.at > Date.now() - 14*864e5),
     tombstones,
     _syncedAt: Date.now()
@@ -2050,6 +2056,44 @@ function scanUpdateFilesInfo(){
   const clr = document.getElementById('scanClearFiles');
   if(clr) clr.addEventListener('click', (e) => { e.preventDefault(); scanFileList = []; scanUpdateFilesInfo(); });
 }
+document.getElementById('scanVisionKey').value = db.scanSettings.visionApiKey || '';
+document.getElementById('scanVisionKey').addEventListener('change', (e) => {
+  db.scanSettings.visionApiKey = e.target.value.trim();
+  db.scanSettings.updatedAt = Date.now();
+  saveDB();
+});
+// Image redimensionnée (sans seuillage) en base64, pour l'API Vision qui
+// fait déjà son propre traitement d'image en interne.
+function scanFileToBase64(file, maxW){
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = img.width > maxW ? maxW / img.width : 1;
+      const cv = document.createElement('canvas');
+      cv.width = Math.round(img.width * scale); cv.height = Math.round(img.height * scale);
+      cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+      URL.revokeObjectURL(img.src);
+      resolve(cv.toDataURL('image/jpeg', 0.92).split(',')[1]);
+    };
+    img.onerror = reject;
+    img.src = URL.createObjectURL(file);
+  });
+}
+// Google Cloud Vision — DOCUMENT_TEXT_DETECTION : le meilleur moteur public
+// disponible pour l'écriture manuscrite. Le texte renvoyé respecte les
+// lignes réellement détectées dans l'image (une ligne horizontale du papier
+// = une ligne du texte renvoyé), ce qui correspond exactement au besoin.
+async function scanVisionOCR(base64, apiKey){
+  const res = await fetch(`https://vision.googleapis.com/v1/images:annotate?key=${encodeURIComponent(apiKey)}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requests: [{ image: { content: base64 }, features: [{ type: 'DOCUMENT_TEXT_DETECTION' }], imageContext: { languageHints: ['fr'] } }] })
+  });
+  const data = await res.json();
+  if(data.error) throw new Error(data.error.message || 'Erreur Google Vision');
+  const r = data.responses && data.responses[0];
+  if(r && r.error) throw new Error(r.error.message || 'Erreur Google Vision');
+  return (r && r.fullTextAnnotation && r.fullTextAnnotation.text) || '';
+}
 document.getElementById('scanCamBtn').addEventListener('click', () => document.getElementById('scanFilesCam').click());
 document.getElementById('scanGalBtn').addEventListener('click', () => document.getElementById('scanFilesGal').click());
 [['scanFilesCam'], ['scanFilesGal']].forEach(([id]) => {
@@ -2176,37 +2220,51 @@ async function scanRun(){
   if(!files.length){ alert('Prenez une photo ou choisissez au moins une image.'); return; }
   const prog = document.getElementById('scanProgress');
   const btn = document.getElementById('scanRunBtn');
+  const visionKey = (db.scanSettings.visionApiKey || '').trim();
   btn.disabled = true; prog.textContent = 'Chargement du moteur de reconnaissance…';
   let worker = null;
   try{
-    await scanLoadTesseract();
-    worker = await Tesseract.createWorker('eng');
     let all = [];
-    for(let i = 0; i < files.length; i++){
-      prog.textContent = `Analyse image ${i+1}/${files.length}…`;
-      const img = await scanFileToImage(files[i]);
-      const canvas = scanPreprocess(img);
-
-      // Passage 1 : lecture normale de l'image entière, ligne par ligne
-      // (chaque ligne horizontale du papier = une ligne détectée par l'OCR).
-      await worker.setParameters({ tessedit_char_whitelist: '', tessedit_pageseg_mode: '6' });
-      const res1 = await worker.recognize(canvas);
-      all = all.concat(scanExtractCandidates(res1.data.text || ''));
-
-      const lines = (res1.data.lines || []).filter(l => scanLineLooksLikeNumber(l.text));
-      let done = 0;
-      for(const line of lines){
-        prog.textContent = `Analyse image ${i+1}/${files.length}… ligne ${++done}/${lines.length}`;
-        const crop = scanCropLine(canvas, line.bbox);
-        if(!crop) continue;
-        // Passage 2 : la MÊME ligne horizontale, agrandie, relue en forçant
-        // uniquement des chiffres — bien plus précis pour un numéro manuscrit
-        // que la lecture générale du passage 1.
-        await worker.setParameters({ tessedit_char_whitelist: '0123456789+', tessedit_pageseg_mode: '7' });
-        const res2 = await worker.recognize(crop);
-        all = all.concat(scanExtractCandidates(res2.data.text || ''));
+    if(visionKey){
+      // Moteur Google Cloud Vision (dernière génération, bien meilleur sur
+      // l'écriture manuscrite) — une ligne détectée dans l'image = une ligne
+      // dans le texte renvoyé, donc on extrait numéro par numéro, ligne par
+      // ligne horizontale.
+      for(let i = 0; i < files.length; i++){
+        prog.textContent = `Analyse image ${i+1}/${files.length} (Google Vision)…`;
+        const base64 = await scanFileToBase64(files[i], 1800);
+        const text = await scanVisionOCR(base64, visionKey);
+        text.split('\n').forEach(line => { all = all.concat(scanExtractCandidates(line)); });
       }
-      URL.revokeObjectURL(img.src);
+    } else {
+      await scanLoadTesseract();
+      worker = await Tesseract.createWorker('eng');
+      for(let i = 0; i < files.length; i++){
+        prog.textContent = `Analyse image ${i+1}/${files.length}…`;
+        const img = await scanFileToImage(files[i]);
+        const canvas = scanPreprocess(img);
+
+        // Passage 1 : lecture normale de l'image entière, ligne par ligne
+        // (chaque ligne horizontale du papier = une ligne détectée par l'OCR).
+        await worker.setParameters({ tessedit_char_whitelist: '', tessedit_pageseg_mode: '6' });
+        const res1 = await worker.recognize(canvas);
+        all = all.concat(scanExtractCandidates(res1.data.text || ''));
+
+        const lines = (res1.data.lines || []).filter(l => scanLineLooksLikeNumber(l.text));
+        let done = 0;
+        for(const line of lines){
+          prog.textContent = `Analyse image ${i+1}/${files.length}… ligne ${++done}/${lines.length}`;
+          const crop = scanCropLine(canvas, line.bbox);
+          if(!crop) continue;
+          // Passage 2 : la MÊME ligne horizontale, agrandie, relue en forçant
+          // uniquement des chiffres — bien plus précis pour un numéro manuscrit
+          // que la lecture générale du passage 1.
+          await worker.setParameters({ tessedit_char_whitelist: '0123456789+', tessedit_pageseg_mode: '7' });
+          const res2 = await worker.recognize(crop);
+          all = all.concat(scanExtractCandidates(res2.data.text || ''));
+        }
+        URL.revokeObjectURL(img.src);
+      }
     }
     const seen = new Set(); scanCandidates = all.filter(c => !seen.has(c.value) && seen.add(c.value));
     prog.textContent = scanCandidates.length ? `${scanCandidates.length} numéro(s) détecté(s). Vérifiez la liste ci-dessous.` : "Aucun numéro détecté dans ces images. Essayez une photo plus nette, mieux cadrée, avec chaque numéro bien sur sa ligne.";
@@ -2313,6 +2371,7 @@ document.getElementById('scanSaveBtn').addEventListener('click', () => {
 /* ================= ROBOT D'ENVOI ================= */
 const RB_DAYS=['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'], $r=id=>document.getElementById(id);
 const RB_DEFAULT_TIMES=Array.from({length:13},(_,i)=>String(8+i).padStart(2,'0')+':00'); // 08:00..20:00
+if(!db.scanSettings) db.scanSettings={visionApiKey:'',updatedAt:1};
 if(!db.robotSettings) db.robotSettings={days:[0,1,2,3,4,5,6],times:RB_DEFAULT_TIMES,autoOpen:true,autoConfirm:true,quietFrom:'21:00',quietTo:'07:00',batchSize:15,maxPerDay:0,jitterMin:0,updatedAt:1};
 if(!db.robotSettings.maxPerDay) db.robotSettings.maxPerDay = db.robotSettings.maxPerDay||0;
 if(db.robotSettings.jitterMin===undefined) db.robotSettings.jitterMin=0;
