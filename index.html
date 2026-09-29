@@ -2276,9 +2276,11 @@ async function scanRun(){
   const groqKey = (db.scanSettings.groqApiKey || '').trim();
   const visionKey = (db.scanSettings.visionApiKey || '').trim();
   const ocrSpaceKey = (db.scanSettings.ocrSpaceApiKey || '').trim();
-  // Ordre de priorité : Groq (IA, gratuit, sans carte) → Google Vision (si
-  // configuré) → OCR.space (gratuit, sans carte) → Tesseract (repli local).
-  const engine = groqKey ? 'groq' : visionKey ? 'vision' : ocrSpaceKey ? 'ocrspace' : 'tesseract';
+  // Ordre de priorité : Groq (IA, gratuit, sans carte) → OCR.space (gratuit,
+  // sans carte) → Google Vision (en dernier — nécessite une carte bancaire
+  // non prépayée pour la facturation, indisponible pour l'instant) → Tesseract
+  // (repli local, toujours disponible si rien n'est configuré).
+  const engine = groqKey ? 'groq' : ocrSpaceKey ? 'ocrspace' : visionKey ? 'vision' : 'tesseract';
   btn.disabled = true; prog.textContent = 'Chargement du moteur de reconnaissance…';
   let worker = null;
   try{
