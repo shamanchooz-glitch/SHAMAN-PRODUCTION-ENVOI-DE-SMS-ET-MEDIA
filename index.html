@@ -488,7 +488,16 @@
     </div>
     <div class="card">
       <h2>Destinataires</h2>
+      <div class="row" id="smsSourceRow" style="margin-bottom:8px;">
+        <label class="check-row" style="flex:1;"><input type="radio" name="smsSource" value="contacts" checked> Contacts / Groupes</label>
+        <label class="check-row" style="flex:1;"><input type="radio" name="smsSource" value="numbers"> Numéros saisis</label>
+      </div>
       <div id="smsRecipientPicker"></div>
+      <div id="smsNumbersWrap" style="display:none;">
+        <textarea id="smsNumbersInput" placeholder="Un numéro par ligne (ou séparés par une virgule)" style="min-height:90px;"></textarea>
+        <label>Indicatif à appliquer aux numéros sans indicatif</label>
+        <select id="smsNumbersDial"></select>
+      </div>
     </div>
     <div class="card">
       <h2>Taille des lots</h2>
@@ -594,15 +603,21 @@
       <label>Date et heure</label>
       <input type="datetime-local" id="schedWhen">
       <label>Destinataires depuis</label>
-      <div class="row" id="schedSourceRow" style="margin-bottom:8px;">
+      <div class="row" id="schedSourceRow" style="margin-bottom:8px;flex-wrap:wrap;">
         <label class="check-row" style="flex:1;"><input type="radio" name="schedSource" value="contacts" checked> Contacts / Groupes</label>
         <label class="check-row" style="flex:1;"><input type="radio" name="schedSource" value="base"> Base de numéros</label>
+        <label class="check-row" style="flex:1;"><input type="radio" name="schedSource" value="numbers"> Numéros saisis</label>
       </div>
       <label>Destinataires</label>
       <div id="schedRecipientPicker"></div>
       <div id="schedBaseWrap" style="display:none;">
         <select id="schedBaseSelect"><option value="">— Choisir une base —</option></select>
         <div class="counter" id="schedBaseInfo" style="text-align:left;margin-top:4px;"></div>
+      </div>
+      <div id="schedNumbersWrap" style="display:none;">
+        <textarea id="schedNumbersInput" placeholder="Un numéro par ligne (ou séparés par une virgule)" style="min-height:90px;"></textarea>
+        <label>Indicatif à appliquer aux numéros sans indicatif</label>
+        <select id="schedNumbersDial"></select>
       </div>
       <div id="schedBatchWrap">
         <label>Taille des lots</label>
@@ -676,7 +691,7 @@
       <div id="scanFilesInfo" class="dim" style="font-size:12px;margin-bottom:8px;">Aucune image sélectionnée.</div>
       <details style="margin-bottom:8px;" open>
         <summary style="font-weight:600;font-size:13px;cursor:pointer;">🔑 Reconnaissance avancée de l'écriture manuscrite (recommandé)</summary>
-        <p class="dim" style="font-size:12px;">Le moteur gratuit intégré (Tesseract) lit mal l'écriture cursive/manuscrite. Renseignez UNE des clés ci-dessous pour une reconnaissance bien plus fiable — l'app utilise la première configurée, dans cet ordre : Groq → Google Vision → OCR.space → Tesseract (repli automatique, sans clé).</p>
+        <p class="dim" style="font-size:12px;">Le moteur gratuit intégré (Tesseract) lit mal l'écriture cursive/manuscrite. Renseignez UNE des clés ci-dessous pour une reconnaissance bien plus fiable — l'app utilise la première configurée, dans cet ordre : Groq → OCR.space → Google Vision → Tesseract (repli automatique, sans clé).</p>
 
         <p class="dim" style="font-size:12px;margin-bottom:2px;"><b>① Groq (recommandé — gratuit, sans carte bancaire)</b> : IA de lecture d'image de dernière génération, efficace sur l'écriture manuscrite. Créez un compte gratuit sur <a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com/keys</a> (email ou Google, aucune carte demandée), copiez la clé générée.</p>
         <input type="password" id="scanGroqKey" placeholder="Clé API Groq (facultatif)">
@@ -1542,13 +1557,34 @@ function getSmsSenderLabel(){
   return smsSenderSelect.value === '__other__' ? smsSenderOther.value.trim() : smsSenderSelect.value;
 }
 
+const smsSourceRadios = () => Array.from(document.querySelectorAll('input[name="smsSource"]'));
+function getSmsSource(){ const c = smsSourceRadios().find(r => r.checked); return c ? c.value : 'contacts'; }
+function updateSmsSourceUI(){
+  const source = getSmsSource();
+  document.getElementById('smsRecipientPicker').style.display = source === 'numbers' ? 'none' : 'block';
+  document.getElementById('smsNumbersWrap').style.display = source === 'numbers' ? 'block' : 'none';
+  if(source === 'numbers') document.getElementById('smsNumbersDial').innerHTML = document.getElementById('cCountry').innerHTML;
+}
+smsSourceRadios().forEach(r => r.addEventListener('change', updateSmsSourceUI));
+
 document.getElementById('buildSmsBatches').addEventListener('click', () => {
-  const recipients = getSelected('smsRecipientPicker');
+  const source = getSmsSource();
   const body = smsBody.value.trim();
   const batchSize = Math.max(1, parseInt(document.getElementById('smsBatchSize').value) || 15);
   const senderLabel = getSmsSenderLabel();
-  if(!recipients.length){ alert('Sélectionnez au moins un destinataire.'); return; }
   if(!body){ alert('Écrivez un message.'); return; }
+
+  let recipients;
+  if(source === 'numbers'){
+    const dial = document.getElementById('smsNumbersDial').value;
+    const raw = document.getElementById('smsNumbersInput').value.split(/[\n,;]+/).map(x => x.trim()).filter(Boolean);
+    const phones = [...new Set(raw.map(n => normalizePhone(n, dial)).filter(n => n && !isBlocked(n)))];
+    if(!phones.length){ alert('Saisissez au moins un numéro valide.'); return; }
+    recipients = phones.map(p => ({ phone: p }));
+  } else {
+    recipients = getSelected('smsRecipientPicker');
+    if(!recipients.length){ alert('Sélectionnez au moins un destinataire.'); return; }
+  }
 
   const batches = [];
   for(let i = 0; i < recipients.length; i += batchSize){
@@ -1736,18 +1772,26 @@ function getSchedSource(){
 }
 function updateSchedSourceUI(){
   const type = schedTypeSelect.value;
-  // Les bases de numéros n'ont pas d'adresse e-mail, et pour WhatsApp il n'y
-  // a pas de notion de "lot" (un lien à ouvrir par numéro) : cette source
-  // n'a donc de sens que pour le SMS.
-  document.getElementById('schedSourceRow').style.display = type === 'sms' ? 'flex' : 'none';
+  // Une base de numéros n'a pas de notion de "lot" pour WhatsApp (un lien à
+  // ouvrir par numéro) : cette source n'a de sens que pour le SMS. Des
+  // numéros saisis à la main, eux, marchent pour SMS et WhatsApp — juste
+  // pas pour l'e-mail (pas d'adresse associée).
+  document.getElementById('schedSourceRow').style.display = type === 'email' ? 'none' : 'flex';
   let source = getSchedSource();
-  if(type !== 'sms' && source === 'base'){
+  if(type === 'email' && source !== 'contacts'){
     document.querySelector('input[name="schedSource"][value="contacts"]').checked = true;
     source = 'contacts';
   }
-  document.getElementById('schedRecipientPicker').style.display = source === 'base' ? 'none' : 'block';
+  if(type === 'whatsapp' && source === 'base'){
+    document.querySelector('input[name="schedSource"][value="contacts"]').checked = true;
+    source = 'contacts';
+  }
+  document.querySelector('input[name="schedSource"][value="base"]').closest('label').style.display = type === 'sms' ? '' : 'none';
+  document.getElementById('schedRecipientPicker').style.display = source === 'contacts' ? 'block' : 'none';
   document.getElementById('schedBaseWrap').style.display = source === 'base' ? 'block' : 'none';
+  document.getElementById('schedNumbersWrap').style.display = source === 'numbers' ? 'block' : 'none';
   if(source === 'base') refreshSchedBaseSelect();
+  if(source === 'numbers') document.getElementById('schedNumbersDial').innerHTML = document.getElementById('cCountry').innerHTML;
 }
 schedSourceRadios().forEach(r => r.addEventListener('change', updateSchedSourceUI));
 function refreshSchedBaseSelect(){
@@ -1825,6 +1869,13 @@ document.getElementById('createSchedBtn').addEventListener('click', () => {
     entry.source = 'base';
     entry.baseId = base.id;
     entry.baseName = base.name;
+  } else if(source === 'numbers'){
+    const dial = document.getElementById('schedNumbersDial').value;
+    const raw = document.getElementById('schedNumbersInput').value.split(/[\n,;]+/).map(x => x.trim()).filter(Boolean);
+    const phones = [...new Set(raw.map(n => normalizePhone(n, dial)).filter(n => n && !isBlocked(n)))];
+    if(!phones.length){ alert('Saisissez au moins un numéro valide.'); return; }
+    entry.source = 'numbers';
+    entry.phones = phones;
   } else {
     const recipients = getSelected('schedRecipientPicker');
     if(!recipients.length){ alert('Sélectionnez au moins un destinataire.'); return; }
@@ -1837,6 +1888,7 @@ document.getElementById('createSchedBtn').addEventListener('click', () => {
   document.getElementById('schedSubject').value = '';
   document.getElementById('schedBody').value = '';
   document.getElementById('schedWhen').value = '';
+  document.getElementById('schedNumbersInput').value = '';
   renderSchedList();
 });
 
@@ -1898,6 +1950,7 @@ function schedRecipientMeta(s){
     const prochainLot = Math.max(0, Math.min(s.batchSize, restants));
     return `Base « ${escapeHtml(base.name)} » · prochain lot : ${prochainLot} numéro(s) (${restants} restants au total)`;
   }
+  if(s.source === 'numbers') return `${s.phones.length} numéro(s) saisi(s)${s.type !== 'whatsapp' ? ' · lots de '+s.batchSize : ''}`;
   return `${s.recipientIds.length} destinataire(s)${s.type !== 'whatsapp' ? ' · lots de '+s.batchSize : ''}`;
 }
 
@@ -1921,7 +1974,9 @@ function openScheduledBatches(id){
     }, 'email');
 
   } else if(s.type === 'whatsapp'){
-    const recipients = db.contacts.filter(c => s.recipientIds.includes(c.id) && c.phone);
+    const recipients = s.source === 'numbers'
+      ? s.phones.map(p => ({ name: p, phone: p }))
+      : db.contacts.filter(c => s.recipientIds.includes(c.id) && c.phone);
     if(!recipients.length){ alert('Aucun destinataire valide (numéro manquant ?).'); return; }
     // WhatsApp has no multi-recipient prefill — one link per contact, opened
     // and sent individually, same principle as everywhere else in the app.
@@ -1937,12 +1992,12 @@ function openScheduledBatches(id){
     `).join('');
 
   } else {
-    const recipients = db.contacts.filter(c => s.recipientIds.includes(c.id) && c.phone);
-    if(!recipients.length){ alert('Aucun destinataire valide (numéro manquant ?).'); return; }
+    const phones = s.source === 'numbers' ? s.phones : db.contacts.filter(c => s.recipientIds.includes(c.id) && c.phone).map(c => c.phone);
+    if(!phones.length){ alert('Aucun destinataire valide (numéro manquant ?).'); return; }
     const batches = [];
-    for(let i = 0; i < recipients.length; i += s.batchSize) batches.push(recipients.slice(i, i + s.batchSize));
+    for(let i = 0; i < phones.length; i += s.batchSize) batches.push(phones.slice(i, i + s.batchSize));
     renderBatches('sched-batches-' + id, batches, (batch, sep) => {
-      const numbers = batch.map(c => c.phone.replace(/\s+/g,'')).join(sep || ',');
+      const numbers = batch.map(p => p.replace(/\s+/g,'')).join(sep || ',');
       return `sms:${numbers}?body=${encodeURIComponent(s.body)}`;
     }, 'sms', s.senderLabel);
   }
@@ -2431,6 +2486,14 @@ document.getElementById('scanSaveBtn').addEventListener('click', () => {
 const RB_DAYS=['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'], $r=id=>document.getElementById(id);
 const RB_DEFAULT_TIMES=Array.from({length:13},(_,i)=>String(8+i).padStart(2,'0')+':00'); // 08:00..20:00
 if(!db.robotSettings) db.robotSettings={days:[0,1,2,3,4,5,6],times:RB_DEFAULT_TIMES,autoOpen:true,autoConfirm:true,quietFrom:'21:00',quietTo:'07:00',batchSize:15,maxPerDay:0,jitterMin:0,updatedAt:1};
+// Migration : les réglages créés avant l'ajout du nouvel horaire par défaut
+// (8h-20h) gardaient l'ancien (09:00/13:00/18:00). On les met à jour UNE
+// fois, seulement si l'horaire n'a jamais été personnalisé, pour ne jamais
+// écraser un choix volontaire de l'utilisateur.
+if(JSON.stringify(db.robotSettings.times) === JSON.stringify(['09:00','13:00','18:00'])){
+  db.robotSettings.times = RB_DEFAULT_TIMES;
+  db.robotSettings.updatedAt = Date.now();
+}
 if(!db.robotSettings.maxPerDay) db.robotSettings.maxPerDay = db.robotSettings.maxPerDay||0;
 if(db.robotSettings.jitterMin===undefined) db.robotSettings.jitterMin=0;
 let rbAwait=null, rbAwaitAt=0, rbHid=false;
