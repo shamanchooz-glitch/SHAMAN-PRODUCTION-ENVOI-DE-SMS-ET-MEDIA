@@ -29,6 +29,18 @@ numéro par l'opérateur ou par WhatsApp, s'ils détectent un envoi
 automatisé inhabituel — gardez des lots raisonnables et espacés dans le
 temps.
 
+## Double SIM : alternance SIM 1 / SIM 2
+
+Dans les réglages « Cartes SIM » (onglets SMS, Programmer, Bases de numéros) :
+
+- **Alterner SIM 1 ↔ SIM 2** : lot 1 = SIM 1, lot 2 = SIM 2, lot 3 = SIM 1… (la charge est répartie sur les deux cartes). Le bouton « Recommencer par la SIM 1 » remet l'alternance à zéro.
+- **SIM 1 seulement** ou **SIM 2 seulement**.
+- Les deux numéros sont modifiables et gardés sur ce téléphone.
+
+Chaque lot affiche en gros « Envoyer avec : SIM 1 / SIM 2 ». Un site web ne peut pas
+forcer la SIM : sur l'écran d'envoi de votre appli SMS, touchez la SIM indiquée avant
+d'appuyer sur Envoyer.
+
 ## Vos contacts restent sur votre téléphone
 
 Contacts et groupes sont stockés uniquement dans ce navigateur/cet

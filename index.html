@@ -477,14 +477,8 @@
       <div class="counter" id="smsCounter">0 caractère · 1 SMS</div>
     </div>
     <div class="card">
-      <h2>Numéro expéditeur (mémo)</h2>
-      <p class="dim">Comme votre téléphone a deux puces, choisissez ici quel numéro doit servir — l'app l'affichera sur chaque lot pour vous le rappeler. C'est vous qui sélectionnez la bonne SIM sur l'écran d'envoi de votre téléphone (ou réglez votre SIM par défaut pour les SMS dans les paramètres).</p>
-      <select id="smsSenderNumber">
-        <option value="07 49 97 09 18">07 49 97 09 18</option>
-        <option value="07 48 93 56 86" selected>07 48 93 56 86</option>
-        <option value="__other__">Autre numéro…</option>
-      </select>
-      <input type="tel" inputmode="tel" id="smsSenderOther" placeholder="Numéro" style="display:none;margin-top:8px;">
+      <h2>📱 Cartes SIM (SIM 1 / SIM 2)</h2>
+      <div class="simPicker"></div>
     </div>
     <div class="card">
       <h2>Destinataires</h2>
@@ -590,13 +584,8 @@
         <input type="text" id="schedSubject" placeholder="Objet de l'e-mail">
       </div>
       <div id="schedSenderWrap">
-        <label>Numéro expéditeur (mémo)</label>
-        <select id="schedSenderNumber">
-          <option value="07 49 97 09 18">07 49 97 09 18</option>
-          <option value="07 48 93 56 86" selected>07 48 93 56 86</option>
-          <option value="__other__">Autre numéro…</option>
-        </select>
-        <input type="tel" inputmode="tel" id="schedSenderOther" placeholder="Numéro" style="display:none;margin-top:8px;">
+        <label>📱 Cartes SIM (SIM 1 / SIM 2)</label>
+        <div class="simPicker"></div>
       </div>
       <label>Message</label>
       <textarea id="schedBody" placeholder="Votre message…"></textarea>
@@ -669,7 +658,7 @@
       <label class="check-row" style="margin-top:8px;"><input type="checkbox" id="rbDefSched" checked> Utiliser la programmation par défaut</label>
       <div id="rbCustom" style="display:none;"><label>Jours</label><div class="row" id="rbDays" style="flex-wrap:wrap;gap:4px;"></div>
       <label>Heures (séparées par une virgule)</label><input id="rbTimes" value="09:00"></div>
-      <label>Envoyer depuis (facultatif — plusieurs numéros séparés par une virgule = alternance à chaque lot, utile en multi-SIM)</label><input id="rbSender" placeholder="Ex. +225 07... , +225 05...">
+      <label>Envoyer depuis (facultatif — laissez vide pour utiliser les réglages SIM 1 / SIM 2 ; sinon plusieurs numéros séparés par une virgule = alternance à chaque lot)</label><input id="rbSender" placeholder="Ex. +225 07... , +225 05...">
       <button class="btn btn-primary" id="rbAddBtn" style="margin-top:10px;">➕ Ajouter au robot</button>
     </div>
     <div class="card">
@@ -782,13 +771,8 @@
       <div class="counter" id="baseSendInfo" style="text-align:left;margin-top:4px;"></div>
       <label>Message</label>
       <textarea id="baseSmsBody" placeholder="Votre message…"></textarea>
-      <label>Numéro expéditeur (mémo)</label>
-      <select id="baseSenderNumber">
-        <option value="07 49 97 09 18">07 49 97 09 18</option>
-        <option value="07 48 93 56 86" selected>07 48 93 56 86</option>
-        <option value="__other__">Autre numéro…</option>
-      </select>
-      <input type="tel" inputmode="tel" id="baseSenderOther" placeholder="Numéro" style="display:none;margin-top:8px;">
+      <label>📱 Cartes SIM (SIM 1 / SIM 2)</label>
+      <div class="simPicker"></div>
       <label>Taille du lot</label>
       <input type="number" id="baseBatchSize" value="15" min="1">
       <div style="height:12px"></div>
@@ -1429,6 +1413,7 @@ function renderContactList(filter, groupFilter){
 document.getElementById('contactSearch').addEventListener('input', (e) => renderContactList(e.target.value));
 
 document.getElementById('exportBtn').addEventListener('click', () => {
+  if(NATIVE){ ShamanNative.saveText('shaman-production-contacts.json', JSON.stringify(db, null, 2)); return; }
   const blob = new Blob([JSON.stringify(db, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -1548,14 +1533,105 @@ smsBody.addEventListener('input', () => {
   counter.className = 'counter' + (segs > 1 ? ' warn' : '');
 });
 
-const smsSenderSelect = document.getElementById('smsSenderNumber');
-const smsSenderOther = document.getElementById('smsSenderOther');
-smsSenderSelect.addEventListener('change', () => {
-  smsSenderOther.style.display = smsSenderSelect.value === '__other__' ? 'block' : 'none';
-});
-function getSmsSenderLabel(){
-  return smsSenderSelect.value === '__other__' ? smsSenderOther.value.trim() : smsSenderSelect.value;
+/* ================= APPLICATION ANDROID (pont natif) =================
+   Dans l'APK, window.ShamanNative existe : les SMS partent directement,
+   sans ouvrir l'appli SMS, avec choix automatique de la SIM. */
+const NATIVE = !!window.ShamanNative;
+const nativeCbs = {};
+window.onShamanSms = function(json){
+  try{ const e = JSON.parse(json); const cb = nativeCbs[e.id]; if(cb) cb(e); if(e.type === 'done') delete nativeCbs[e.id]; }catch(err){}
+};
+function nativeSims(){ try{ return JSON.parse(ShamanNative.getSims()); }catch(e){ return []; } }
+function nativeSend(numbers, body, onEvent){
+  const id = 'n' + Date.now() + Math.random().toString(36).slice(2, 6);
+  nativeCbs[id] = onEvent;
+  const S = simGet();
+  const r = ShamanNative.sendSms(JSON.stringify({ id, numbers, body, mode: S.mode, delay: S.delay }));
+  if(r !== 'ok'){ delete nativeCbs[id]; onEvent({ id, type: 'error', message: r }); }
+  return id;
 }
+function cleanNum(n){ return String(n).replace(/\s+/g, ''); }
+// Branche un bouton « envoi automatique » : progression + fin.
+function nativeRun(btn, statusEl, numbers, body, onDone){
+  btn.disabled = true;
+  statusEl.textContent = '⏳ Envoi en cours…';
+  nativeSend(numbers, body, e => {
+    if(e.type === 'progress') statusEl.textContent = `⏳ ${e.sent + e.failed} / ${e.total} (échecs : ${e.failed}) · ${e.sim || ''}`;
+    else if(e.type === 'error'){ statusEl.textContent = '⚠️ ' + e.message; btn.disabled = false; }
+    else if(e.type === 'done'){
+      statusEl.textContent = `✅ Terminé : ${e.sent} envoyé(s), ${e.failed} échec(s)`;
+      btn.disabled = false;
+      if(e.sent > 0 && !e.cancelled && onDone) onDone(e);
+    }
+  });
+}
+if(NATIVE){
+  document.addEventListener('DOMContentLoaded', () => {
+    const c = document.getElementById('installAppBtn'); if(c){ const card = c.closest('.card'); if(card) card.style.display = 'none'; }
+  });
+}
+
+/* ================= SIM 1 / SIM 2 (alternance) =================
+   Une page web ne peut pas choisir la SIM toute seule : Android décide
+   sur l'écran d'envoi de l'appli SMS. L'app alterne donc SIM 1 / SIM 2
+   d'un lot à l'autre et affiche en gros la SIM à toucher pour chaque lot.
+   Réglages gardés sur CE téléphone (localStorage), pas synchronisés,
+   car les cartes SIM sont propres à chaque appareil. */
+const SIM_KEY = 'shaman_sim_v1';
+const SIM_DEFAULT = { mode: 'alt', sim1: '07 49 97 09 18', sim2: '07 48 93 56 86', seq: 0, delay: 3 };
+function simGet(){
+  try{ return Object.assign({}, SIM_DEFAULT, JSON.parse(localStorage.getItem(SIM_KEY) || '{}')); }
+  catch(e){ return Object.assign({}, SIM_DEFAULT); }
+}
+function simSet(patch){
+  const v = Object.assign(simGet(), patch);
+  try{ localStorage.setItem(SIM_KEY, JSON.stringify(v)); }catch(e){}
+  return v;
+}
+// n = numéro du lot (0, 1, 2…). Mode « alt » : pair = SIM 1, impair = SIM 2.
+function simLabelAt(n){
+  const S = simGet();
+  if(NATIVE) return S.mode === '1' ? 'SIM 1 (automatique)' : S.mode === '2' ? 'SIM 2 (automatique)' : 'SIM 1 ↔ SIM 2 (alternance automatique à chaque SMS)';
+  const which = S.mode === '1' ? 1 : S.mode === '2' ? 2 : (((n || 0) % 2) === 0 ? 1 : 2);
+  const num = (which === 1 ? S.sim1 : S.sim2).trim();
+  return 'SIM ' + which + (num ? ' · ' + num : '');
+}
+function simSeq(){ return simGet().seq || 0; }
+function simAdvance(by){ simSet({ seq: simSeq() + (by || 1) }); renderSimPickers(); }
+function renderSimPickers(){
+  const S = simGet();
+  const next = S.mode === 'alt' ? 'Prochain lot : ' + simLabelAt(S.seq) : '';
+  document.querySelectorAll('.simPicker').forEach(el => {
+    el.innerHTML = `
+      <p class="dim" style="margin-top:0;">Choisissez comment répartir les envois. Pour chaque lot, l'app affiche la SIM à utiliser ; sur l'écran d'envoi de votre appli SMS, touchez cette SIM avant d'appuyer sur Envoyer.</p>
+      <label class="check-row"><input type="radio" name="simMode-${Math.random().toString(36).slice(2)}" data-sim-mode="alt" ${S.mode==='alt'?'checked':''}> 🔄 Alterner SIM 1 ↔ SIM 2 (recommandé)</label>
+      <label class="check-row"><input type="radio" data-sim-mode="1" ${S.mode==='1'?'checked':''}> SIM 1 seulement</label>
+      <label class="check-row"><input type="radio" data-sim-mode="2" ${S.mode==='2'?'checked':''}> SIM 2 seulement</label>
+      <label>Numéro de la SIM 1</label><input type="tel" inputmode="tel" data-sim-num="sim1" value="${escapeHtml(S.sim1)}">
+      <label>Numéro de la SIM 2</label><input type="tel" inputmode="tel" data-sim-num="sim2" value="${escapeHtml(S.sim2)}">
+      ${NATIVE ? `<div style="font-size:12.5px;margin-top:8px;">${nativeSims().map(x => '📶 SIM ' + (x.slot + 1) + ' : ' + escapeHtml(x.name || '') + (x.number ? ' · ' + escapeHtml(x.number) : '')).join('<br>') || '⚠️ Aucune SIM détectée (autorisez « Téléphone » pour l\'app).'}</div>
+      <label>Pause entre deux SMS (secondes)</label><input type="number" min="0" max="60" data-sim-delay value="${S.delay}"><button type="button" class="btn btn-secondary btn-small" data-sim-stop style="margin-top:8px;">⛔ Arrêter tous les envois en cours</button>` : ''}
+      ${next && !NATIVE ? `<div style="font-size:12.5px;color:#C43E71;font-weight:700;margin-top:8px;">${escapeHtml(next)}</div><button type="button" class="btn btn-secondary btn-small" data-sim-reset style="margin-top:6px;">↺ Recommencer par la SIM 1</button>` : ''}`;
+    // Les boutons radio de chaque bloc doivent former un groupe distinct.
+    const grp = 'simMode-' + Math.random().toString(36).slice(2);
+    el.querySelectorAll('[data-sim-mode]').forEach(r => {
+      r.name = grp;
+      r.addEventListener('change', () => { simSet({ mode: r.dataset.simMode }); renderSimPickers(); });
+    });
+    el.querySelectorAll('[data-sim-num]').forEach(inp => {
+      inp.addEventListener('input', () => {
+        simSet({ [inp.dataset.simNum]: inp.value });
+        document.querySelectorAll(`[data-sim-num="${inp.dataset.simNum}"]`).forEach(o => { if(o !== inp) o.value = inp.value; });
+      });
+    });
+    const stp = el.querySelector('[data-sim-stop]'); if(stp) stp.addEventListener('click', () => { try{ ShamanNative.cancel(); }catch(e){} });
+    const dl = el.querySelector('[data-sim-delay]');
+    if(dl) dl.addEventListener('input', () => simSet({ delay: Math.max(0, parseInt(dl.value) || 0) }));
+    const rb = el.querySelector('[data-sim-reset]');
+    if(rb) rb.addEventListener('click', () => { simSet({ seq: 0 }); renderSimPickers(); });
+  });
+}
+renderSimPickers();
 
 const smsSourceRadios = () => Array.from(document.querySelectorAll('input[name="smsSource"]'));
 function getSmsSource(){ const c = smsSourceRadios().find(r => r.checked); return c ? c.value : 'contacts'; }
@@ -1571,7 +1647,6 @@ document.getElementById('buildSmsBatches').addEventListener('click', () => {
   const source = getSmsSource();
   const body = smsBody.value.trim();
   const batchSize = Math.max(1, parseInt(document.getElementById('smsBatchSize').value) || 15);
-  const senderLabel = getSmsSenderLabel();
   if(!body){ alert('Écrivez un message.'); return; }
 
   let recipients;
@@ -1593,7 +1668,7 @@ document.getElementById('buildSmsBatches').addEventListener('click', () => {
   renderBatches('smsBatches', batches, (batch, sep) => {
     const numbers = batch.map(c => c.phone.replace(/\s+/g,'')).join(sep || ',');
     return `sms:${numbers}?body=${encodeURIComponent(body)}`;
-  }, 'sms', senderLabel);
+  }, 'sms', (() => { const st = simSeq(); simAdvance(batches.length); return i => simLabelAt(st + i); })());
 });
 
 /* ================= EMAIL ================= */
@@ -1626,7 +1701,8 @@ function renderBatches(containerId, batches, buildLink, kind, senderLabel){
   if(!batches.length){ el.innerHTML = ''; return; }
 
   el.innerHTML = batches.map((batch, i) => {
-    const senderHtml = senderLabel ? `<div style="font-size:12.5px;color:#C43E71;font-weight:700;margin-bottom:8px;">📱 Envoyer depuis : ${escapeHtml(senderLabel)}</div>` : '';
+    const sl = typeof senderLabel === 'function' ? senderLabel(i) : senderLabel;
+    const senderHtml = sl ? `<div style="font-size:14px;color:#C43E71;font-weight:800;margin-bottom:8px;">📱 Envoyer avec : ${escapeHtml(sl)}</div>` : '';
 
     if(kind === 'sms'){
       const numbers = batch.map(c => (typeof c === 'string' ? c : c.phone).replace(/\s+/g,''));
@@ -1640,9 +1716,11 @@ function renderBatches(containerId, batches, buildLink, kind, senderLabel){
           <span class="count">${batch.length} destinataire${batch.length>1?'s':''}</span>
         </div>
         ${senderHtml}
+        <div class="auto-status" style="font-size:13px;font-weight:700;margin-bottom:6px;"></div>
         <div class="sms-numbers" data-copy="${escapeHtml(numbersText)}" style="font-size:12.5px;color:var(--text-dim);background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px;margin-bottom:8px;word-break:break-all;">${escapeHtml(numbersText)}</div>
         <div class="row" style="margin-bottom:6px;">
-          <a class="btn btn-primary" style="text-align:center;text-decoration:none;" href="${linkComma}" data-batch="${i}" data-container="${containerId}">Ouvrir SMS</a>
+          ${NATIVE ? `<button class="btn btn-primary" data-auto-send="${i}">⚡ Envoyer automatiquement</button>` : ''}
+          <a class="btn ${NATIVE ? 'btn-secondary btn-small' : 'btn-primary'}" style="text-align:center;text-decoration:none;" href="${linkComma}" data-batch="${i}" data-container="${containerId}">Ouvrir SMS</a>
           <button class="btn btn-secondary btn-small" data-copy-btn style="flex:0 0 auto;">📋 Copier</button>
         </div>
         <div class="row">
@@ -1672,6 +1750,18 @@ function renderBatches(containerId, batches, buildLink, kind, senderLabel){
       if(batchEl.classList.contains('done')) return;
       batchEl.classList.add('done');
       batchEl.querySelector('.batch-head').insertAdjacentHTML('beforeend', '<span class="sent-badge">✓ Envoyé</span>');
+    });
+  });
+  el.querySelectorAll('[data-auto-send]').forEach(b => {
+    b.addEventListener('click', () => {
+      const i = parseInt(b.dataset.autoSend);
+      const batchEl = b.closest('.batch');
+      const link = buildLink(batches[i], ',');
+      const body = decodeURIComponent(link.slice(link.indexOf('?body=') + 6));
+      const nums = batches[i].map(c => cleanNum(typeof c === 'string' ? c : c.phone));
+      nativeRun(b, batchEl.querySelector('.auto-status'), nums, body, () => {
+        const m = batchEl.querySelector('[data-mark]'); if(m) m.click();
+      });
     });
   });
   el.querySelectorAll('[data-copy-btn]').forEach(b => {
@@ -1740,6 +1830,25 @@ document.getElementById('shareWhatsappBtn').addEventListener('click', async () =
   const caption = document.getElementById('mediaCaption').value.trim();
   if(!pickedFiles.length && !caption){
     status.textContent = 'Choisissez au moins un fichier ou écrivez une légende.';
+    return;
+  }
+  if(NATIVE){
+    try{
+      status.textContent = '⏳ Préparation des fichiers…';
+      ShamanNative.shareBegin();
+      for(const f of pickedFiles){
+        ShamanNative.shareFileStart(f.name || 'fichier', f.type || 'application/octet-stream');
+        const CH = 384 * 1024;
+        for(let o = 0; o < f.size; o += CH){
+          const buf = new Uint8Array(await f.slice(o, o + CH).arrayBuffer());
+          let bin = ''; for(let k = 0; k < buf.length; k += 8192) bin += String.fromCharCode.apply(null, buf.subarray(k, k + 8192));
+          ShamanNative.shareFileChunk(btoa(bin));
+        }
+        ShamanNative.shareFileEnd();
+      }
+      ShamanNative.shareSend(caption);
+      status.textContent = 'Partage ouvert — choisissez WhatsApp puis vos contacts.';
+    }catch(err){ status.textContent = 'Partage impossible : ' + err; }
     return;
   }
   const shareData = {};
@@ -1822,14 +1931,6 @@ schedTypeSelect.addEventListener('change', () => {
   updateSchedSourceUI();
 });
 
-const schedSenderSelect = document.getElementById('schedSenderNumber');
-const schedSenderOther = document.getElementById('schedSenderOther');
-schedSenderSelect.addEventListener('change', () => {
-  schedSenderOther.style.display = schedSenderSelect.value === '__other__' ? 'block' : 'none';
-});
-function getSchedSenderLabel(){
-  return schedSenderSelect.value === '__other__' ? schedSenderOther.value.trim() : schedSenderSelect.value;
-}
 
 document.getElementById('askNotifBtn').addEventListener('click', async () => {
   if(!('Notification' in window)){
@@ -1854,7 +1955,7 @@ document.getElementById('createSchedBtn').addEventListener('click', () => {
   let entry = {
     id: 's' + Date.now(),
     type, subject, body, batchSize,
-    senderLabel: type === 'sms' ? getSchedSenderLabel() : '',
+    senderLabel: '',
     when: new Date(when).getTime(),
     status: 'pending', // pending -> ready -> done
   };
@@ -1999,7 +2100,10 @@ function openScheduledBatches(id){
     renderBatches('sched-batches-' + id, batches, (batch, sep) => {
       const numbers = batch.map(p => p.replace(/\s+/g,'')).join(sep || ',');
       return `sms:${numbers}?body=${encodeURIComponent(s.body)}`;
-    }, 'sms', s.senderLabel);
+    }, 'sms', (() => {
+      if(s.simStart === undefined){ s.simStart = simSeq(); simAdvance(batches.length); }
+      const st = s.simStart; return i => simLabelAt(st + i);
+    })());
   }
 
   s.status = 'ready'; // stays ready until user deletes it; marking "done" is manual, like other batches
@@ -2054,7 +2158,7 @@ function renderSchedBaseBatch(s){
         <span class="label">Lot en cours — ${escapeHtml(base.name)}</span>
         <span class="count">${batch.length} destinataire${batch.length > 1 ? 's' : ''}</span>
       </div>
-      ${s.senderLabel ? `<div style="font-size:12.5px;color:#C43E71;font-weight:700;margin-bottom:8px;">📱 Envoyer depuis : ${escapeHtml(s.senderLabel)}</div>` : ''}
+      <div style="font-size:14px;color:#C43E71;font-weight:800;margin-bottom:8px;">📱 Envoyer avec : ${escapeHtml(simLabelAt(simSeq()))}</div>
       <div class="sms-numbers" style="font-size:12.5px;color:var(--text-dim);background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px;margin-bottom:8px;word-break:break-all;">${escapeHtml(numbersText)}</div>
       <div class="row" style="margin-bottom:6px;">
         <a class="btn btn-primary" style="text-align:center;text-decoration:none;" href="${linkComma}">Ouvrir SMS</a>
@@ -2081,6 +2185,7 @@ function renderSchedBaseBatch(s){
     // Pour envoyer le lot suivant, programmez un nouveau rappel — comme
     // pour n'importe quel autre envoi programmé de l'app.
     freshS.status = 'done';
+    simAdvance(1);
     saveDB();
     renderSchedList();
   });
@@ -2501,7 +2606,7 @@ const rbDate=d=>d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.
 const rbSched=r=>r.useDefault?db.robotSettings:r;
 function rbQuiet(){const S=db.robotSettings,n=new Date(),m=n.getHours()*60+n.getMinutes(),f=t=>{const[a,b]=t.split(':').map(Number);return a*60+b},a=f(S.quietFrom),b=f(S.quietTo);return a===b?false:(a<b?m>=a&&m<b:m>=a||m<b);}
 function rbMsg(r,j){const v=r.body.split(/\n\s*---\s*\n/).map(x=>x.trim()).filter(Boolean);return v[(j.v||0)%v.length]||r.body;}
-function rbSenderFor(r,j){const l=(r.sender||'').split(',').map(x=>x.trim()).filter(Boolean);return l.length?l[(j.v||0)%l.length]:'';}
+function rbSenderFor(r,j){const l=(r.sender||'').split(',').map(x=>x.trim()).filter(Boolean);return l.length?l[(j.v||0)%l.length]:simLabelAt(j.v||0);}
 function rbToday(){const d=new Date();return d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0');}
 function rbSentToday(){const t0=rbToday();let n=0;db.robotJobs.forEach(j=>(j.log||[]).forEach(l=>{if(rbDate(new Date(l.t))===t0) n+=l.n;}));return n;}
 function rbQuotaLeft(){const S=db.robotSettings;return S.maxPerDay>0?Math.max(0,S.maxPerDay-rbSentToday()):Infinity;}
@@ -2564,8 +2669,16 @@ function rbUndo(id){
 function rbAuto(){
   const S=db.robotSettings;
   if(rbAwait&&Date.now()-rbAwaitAt>6e5) rbAwait=null;
-  if(!S.autoOpen||document.hidden||rbAwait||rbQuiet()||rbQuotaLeft()<=0) return;
+  if((!S.autoOpen&&!NATIVE)||document.hidden||rbAwait||rbQuiet()||rbQuotaLeft()<=0) return;
   const it=rbItems().find(x=>x.c); if(!it||it.j.tried) return;
+  if(NATIVE){
+    it.j.tried=Date.now(); saveDB(); rbAwait=it.j.id; rbAwaitAt=Date.now();
+    nativeSend(it.c.nums.map(cleanNum), it.msg, ev=>{
+      if(ev.type==='done'){ rbAwait=null; if(ev.sent>0&&!ev.cancelled) rbSent(it.r,it.j); }
+      else if(ev.type==='error'){ rbAwait=null; }
+    });
+    return;
+  }
   it.j.tried=Date.now(); saveDB(); rbAwait=it.j.id; rbAwaitAt=Date.now(); rbHid=false;
   location.href='sms:'+it.c.nums.map(x=>x.replace(/\s+/g,'')).join(',')+'?body='+encodeURIComponent(it.msg);
 }
@@ -3090,14 +3203,6 @@ document.getElementById('baseSendSelect').addEventListener('change', () => {
   renderCurrentBaseBatch();
 });
 
-const baseSenderSelect = document.getElementById('baseSenderNumber');
-const baseSenderOther = document.getElementById('baseSenderOther');
-baseSenderSelect.addEventListener('change', () => {
-  baseSenderOther.style.display = baseSenderSelect.value === '__other__' ? 'block' : 'none';
-});
-function getBaseSenderLabel(){
-  return baseSenderSelect.value === '__other__' ? baseSenderOther.value.trim() : baseSenderSelect.value;
-}
 
 // Le lot "en préparation" (base.pendingBatch) est enregistré dans les
 // données de l'app, pas seulement en mémoire JS. Sur téléphone, ouvrir
@@ -3110,7 +3215,8 @@ function renderCurrentBaseBatch(){
   const base = db.phoneBases.find(x => x.id === document.getElementById('baseSendSelect').value);
   if(!base || !base.pendingBatch){ container.innerHTML = ''; return; }
 
-  const { start, size, body, senderLabel } = base.pendingBatch;
+  const { start, size, body } = base.pendingBatch;
+  const senderLabel = simLabelAt(base.pendingBatch.simIdx || 0);
   const batch = base.numbers.slice(start, start + size);
   if(!batch.length){
     // La base a changé sous nos pieds (numéros supprimés) : le lot préparé
@@ -3132,12 +3238,13 @@ function renderCurrentBaseBatch(){
         <span class="label">Lot en cours</span>
         <span class="count">${batch.length} destinataire${batch.length > 1 ? 's' : ''}</span>
       </div>
-      ${senderLabel ? `<div style="font-size:12.5px;color:#C43E71;font-weight:700;margin-bottom:8px;">📱 Envoyer depuis : ${escapeHtml(senderLabel)}</div>` : ''}
+      <div style="font-size:14px;color:#C43E71;font-weight:800;margin-bottom:8px;">📱 Envoyer avec : ${escapeHtml(senderLabel)}</div>
       <div class="sms-numbers" style="font-size:12.5px;color:var(--text-dim);background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px;margin-bottom:8px;word-break:break-all;">${escapeHtml(numbersText)}</div>
       <div class="row" style="margin-bottom:6px;">
-        <a class="btn btn-primary" style="text-align:center;text-decoration:none;" href="${linkComma}" id="baseOpenSmsLink">Ouvrir SMS</a>
+        ${NATIVE ? `<button class="btn btn-primary" id="baseAutoBtn">⚡ Envoyer ce lot</button>` : `<a class="btn btn-primary" style="text-align:center;text-decoration:none;" href="${linkComma}" id="baseOpenSmsLink">Ouvrir SMS</a>`}
         <button class="btn btn-secondary btn-small" id="baseCopyBtn" style="flex:0 0 auto;">📋 Copier</button>
       </div>
+      ${NATIVE ? `<div class="row" style="margin-bottom:6px;"><button class="btn btn-primary" id="baseAutoAllBtn">⚡⚡ Tout envoyer automatiquement (jusqu'à la fin de la base)</button></div><div id="baseAutoStatus" style="font-size:13px;font-weight:700;margin-bottom:6px;"></div>` : ''}
       <div class="row">
         <a class="btn btn-secondary btn-small" style="text-align:center;text-decoration:none;flex:1;" href="${linkSemi}">Numéros incorrects ? Autre format</a>
         <button class="btn btn-primary btn-small" id="baseMarkSentBtn" style="flex:0 0 auto;">✓ Lot envoyé — suivant</button>
@@ -3147,6 +3254,39 @@ function renderCurrentBaseBatch(){
   document.getElementById('baseCopyBtn').addEventListener('click', () => {
     copyToClipboard(numbersText, document.getElementById('baseCopyBtn'));
   });
+  if(NATIVE){
+    const st = document.getElementById('baseAutoStatus');
+    document.getElementById('baseAutoBtn').addEventListener('click', e => {
+      nativeRun(e.target, st, numbersClean, body, () => document.getElementById('baseMarkSentBtn').click());
+    });
+    document.getElementById('baseAutoAllBtn').addEventListener('click', e => {
+      const sel = document.getElementById('baseSendSelect').value;
+      const bodyAll = body;
+      const step = () => {
+        const b = db.phoneBases.find(x => x.id === sel);
+        if(!b || b.cursor >= b.numbers.length){ const s2 = document.getElementById('baseAutoStatus'); if(s2) s2.textContent = '✅ Toute la base a été envoyée.'; return; }
+        if(!b.pendingBatch){
+          b.pendingBatch = { start: b.cursor, size: Math.min(Math.max(1, parseInt(document.getElementById('baseBatchSize').value) || 15), b.numbers.length - b.cursor), body: bodyAll, simIdx: 0 };
+          saveDB(); renderCurrentBaseBatch();
+        }
+        const bb = db.phoneBases.find(x => x.id === sel);
+        const nums = bb.numbers.slice(bb.pendingBatch.start, bb.pendingBatch.start + bb.pendingBatch.size).map(cleanNum).filter(n => !isBlocked(n));
+        const s3 = document.getElementById('baseAutoStatus');
+        nativeSend(nums, bb.pendingBatch.body, ev => {
+          const s4 = document.getElementById('baseAutoStatus');
+          if(ev.type === 'progress' && s4) s4.textContent = `⏳ Lot en cours : ${ev.sent + ev.failed} / ${ev.total} · restants dans la base : ${bb.numbers.length - bb.cursor}`;
+          else if(ev.type === 'error' && s4) s4.textContent = '⚠️ ' + ev.message;
+          else if(ev.type === 'done'){
+            if(ev.cancelled){ if(s4) s4.textContent = '⛔ Envoi arrêté.'; return; }
+            if(ev.sent === 0 && ev.failed > 0){ if(s4) s4.textContent = '⚠️ Arrêt : aucun SMS du lot n\'est parti (crédit, réseau ou autorisation ?).'; return; }
+            const m = document.getElementById('baseMarkSentBtn'); if(m) m.click();
+            setTimeout(step, 500);
+          }
+        });
+      };
+      e.target.disabled = true; step();
+    });
+  }
 
   // Recherche fraîche de la base par id au moment du clic : fonctionne même
   // si la page a été rechargée entre-temps (Android en arrière-plan), tant
@@ -3157,6 +3297,7 @@ function renderCurrentBaseBatch(){
     b.cursor = b.pendingBatch.start + b.pendingBatch.size;
     delete b.pendingBatch;
     b.updatedAt = Date.now();
+    simAdvance(1);
     saveDB();
     updateBaseMeta(b.id);
     updateBaseSendInfo();
@@ -3184,7 +3325,7 @@ document.getElementById('prepareBaseBatchBtn').addEventListener('click', () => {
     start: base.cursor,
     size: Math.min(batchSize, remainingCount),
     body,
-    senderLabel: getBaseSenderLabel()
+    simIdx: simSeq()
   };
   base.updatedAt = Date.now();
   saveDB();
@@ -3225,7 +3366,7 @@ checkSchedules();
 renderSchedList();
 if(getSyncCode() && isAutoSyncOn()) syncNow(getSyncCode(), { silent: true });
 
-if('serviceWorker' in navigator){
+if('serviceWorker' in navigator && !NATIVE){
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   });
