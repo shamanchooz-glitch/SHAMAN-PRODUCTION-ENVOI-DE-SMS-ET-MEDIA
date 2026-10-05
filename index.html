@@ -478,7 +478,7 @@
     </div>
     <div class="card">
       <h2>📱 Cartes SIM (SIM 1 / SIM 2)</h2>
-      <div class="simPicker"></div>
+      <div class="simPicker" data-ctx="sms"></div>
     </div>
     <div class="card">
       <h2>Destinataires</h2>
@@ -585,7 +585,7 @@
       </div>
       <div id="schedSenderWrap">
         <label>📱 Cartes SIM (SIM 1 / SIM 2)</label>
-        <div class="simPicker"></div>
+        <div class="simPicker" data-ctx="sched"></div>
       </div>
       <label>Message</label>
       <textarea id="schedBody" placeholder="Votre message…"></textarea>
@@ -772,7 +772,7 @@
       <label>Message</label>
       <textarea id="baseSmsBody" placeholder="Votre message…"></textarea>
       <label>📱 Cartes SIM (SIM 1 / SIM 2)</label>
-      <div class="simPicker"></div>
+      <div class="simPicker" data-ctx="base"></div>
       <label>Taille du lot</label>
       <input type="number" id="baseBatchSize" value="15" min="1">
       <div style="height:12px"></div>
@@ -1598,6 +1598,74 @@ function simLabelAt(n){
 }
 function simSeq(){ return simGet().seq || 0; }
 function simAdvance(by){ simSet({ seq: simSeq() + (by || 1) }); renderSimPickers(); }
+let simAllRunning = false, simAllStop = false, simAllMsg = '';
+function setSimAllMsg(t){ simAllMsg = t; document.querySelectorAll('.sim-all-status').forEach(e => { e.textContent = t; }); }
+function simAllFinish(t){ simAllRunning = false; setSimAllMsg(t); renderSimPickers(); }
+function simAllStart(){ simAllRunning = true; simAllStop = false; renderSimPickers(); }
+
+// Onglet SMS : prépare les lots puis les envoie un par un, sans rien toucher.
+async function smsAutoAll(){
+  if(simAllRunning) return;
+  document.getElementById('buildSmsBatches').click();
+  const btns = [...document.querySelectorAll('#smsBatches [data-auto-send]')];
+  if(!btns.length) return;
+  if(!confirm(`Envoyer automatiquement ${btns.length} lot(s) de SMS, avec alternance des SIM ?`)) return;
+  simAllStart();
+  for(let i = 0; i < btns.length; i++){
+    if(simAllStop) break;
+    const batchEl = btns[i].closest('.batch');
+    setSimAllMsg(`⏳ Lot ${i + 1} / ${btns.length} en cours…`);
+    const t0 = Date.now();
+    btns[i].click();
+    const ok = await new Promise(res => {
+      const t = setInterval(() => {
+        if(batchEl.classList.contains('done')){ clearInterval(t); res(true); }
+        else if(simAllStop || (!btns[i].disabled && Date.now() - t0 > 1500)){ clearInterval(t); res(false); }
+      }, 700);
+    });
+    if(!ok){ simAllFinish(simAllStop ? '⛔ Envoi arrêté.' : '⚠️ Arrêt : le lot ' + (i + 1) + ' n\'est pas parti (autorisation, SIM ou réseau ?).'); return; }
+  }
+  simAllFinish(simAllStop ? '⛔ Envoi arrêté.' : '✅ Tous les lots ont été envoyés.');
+}
+
+// Onglet Bases : envoie toute la base restante, lot après lot.
+function baseAutoAll(){
+  if(simAllRunning) return;
+  const sel = document.getElementById('baseSendSelect').value;
+  const base0 = db.phoneBases.find(x => x.id === sel);
+  if(!base0){ alert('Choisissez une base.'); return; }
+  const bodyAll = ((base0.pendingBatch && base0.pendingBatch.body) || document.getElementById('baseSmsBody').value).trim();
+  if(!bodyAll){ alert('Écrivez un message.'); return; }
+  const left = base0.numbers.length - base0.cursor;
+  if(left <= 0){ alert("Tous les numéros de cette base ont déjà été traités. Utilisez « Réinitialiser l'envoi » pour recommencer."); return; }
+  if(!confirm(`Envoyer automatiquement à ${left} numéro(s) restant(s), avec alternance des SIM ?`)) return;
+  const size = Math.max(1, parseInt(document.getElementById('baseBatchSize').value) || 15);
+  simAllStart();
+  const step = () => {
+    if(simAllStop){ simAllFinish('⛔ Envoi arrêté.'); return; }
+    const b = db.phoneBases.find(x => x.id === sel);
+    if(!b || b.cursor >= b.numbers.length){ simAllFinish('✅ Toute la base a été envoyée.'); return; }
+    if(!b.pendingBatch){
+      b.pendingBatch = { start: b.cursor, size: Math.min(size, b.numbers.length - b.cursor), body: bodyAll, simIdx: 0 };
+      b.updatedAt = Date.now(); saveDB(); renderCurrentBaseBatch();
+    }
+    const pb = b.pendingBatch;
+    const nums = b.numbers.slice(pb.start, pb.start + pb.size).map(cleanNum).filter(n => n && !isBlocked(n));
+    nativeSend(nums, pb.body, ev => {
+      const rest = b.numbers.length - b.cursor;
+      if(ev.type === 'progress') setSimAllMsg(`⏳ ${ev.sent + ev.failed} / ${ev.total} dans le lot · ${ev.sim || ''} · restants : ${rest}`);
+      else if(ev.type === 'error') setSimAllMsg('⚠️ ' + ev.message);
+      else if(ev.type === 'done'){
+        if(ev.cancelled || simAllStop){ simAllFinish('⛔ Envoi arrêté.'); return; }
+        if(ev.sent === 0 && ev.failed > 0){ simAllFinish('⚠️ Arrêt : aucun SMS du lot n\'est parti (crédit, réseau ou autorisation ?).'); return; }
+        const m = document.getElementById('baseMarkSentBtn'); if(m) m.click();
+        setTimeout(step, 500);
+      }
+    });
+  };
+  step();
+}
+
 function renderSimPickers(){
   const S = simGet();
   const next = S.mode === 'alt' ? 'Prochain lot : ' + simLabelAt(S.seq) : '';
@@ -1610,7 +1678,7 @@ function renderSimPickers(){
       <label>Numéro de la SIM 1</label><input type="tel" inputmode="tel" data-sim-num="sim1" value="${escapeHtml(S.sim1)}">
       <label>Numéro de la SIM 2</label><input type="tel" inputmode="tel" data-sim-num="sim2" value="${escapeHtml(S.sim2)}">
       ${NATIVE ? `<div style="font-size:12.5px;margin-top:8px;">${nativeSims().map(x => '📶 SIM ' + (x.slot + 1) + ' : ' + escapeHtml(x.name || '') + (x.number ? ' · ' + escapeHtml(x.number) : '')).join('<br>') || '⚠️ Aucune SIM détectée (autorisez « Téléphone » pour l\'app).'}</div>
-      <label>Pause entre deux SMS (secondes)</label><input type="number" min="0" max="60" data-sim-delay value="${S.delay}"><button type="button" class="btn btn-secondary btn-small" data-sim-stop style="margin-top:8px;">⛔ Arrêter tous les envois en cours</button>` : ''}
+      <label>Pause entre deux SMS (secondes)</label><input type="number" min="0" max="60" data-sim-delay value="${S.delay}"><div class="row" style="gap:8px;margin-top:12px;flex-wrap:wrap;"><button type="button" class="btn btn-secondary btn-small" data-sim-stop style="flex:1 1 140px;">⛔ Arrêter tous les envois en cours</button>${(el.dataset.ctx === 'sms' || el.dataset.ctx === 'base') ? `<button type="button" class="btn btn-primary btn-small" data-sim-all style="flex:1 1 140px;" ${simAllRunning ? 'disabled' : ''}>⚡ Tout envoyer automatiquement</button>` : ''}</div><div class="sim-all-status" style="font-size:13px;font-weight:700;margin-top:8px;">${escapeHtml(simAllMsg)}</div>` : ''}
       ${next && !NATIVE ? `<div style="font-size:12.5px;color:#C43E71;font-weight:700;margin-top:8px;">${escapeHtml(next)}</div><button type="button" class="btn btn-secondary btn-small" data-sim-reset style="margin-top:6px;">↺ Recommencer par la SIM 1</button>` : ''}`;
     // Les boutons radio de chaque bloc doivent former un groupe distinct.
     const grp = 'simMode-' + Math.random().toString(36).slice(2);
@@ -1624,7 +1692,8 @@ function renderSimPickers(){
         document.querySelectorAll(`[data-sim-num="${inp.dataset.simNum}"]`).forEach(o => { if(o !== inp) o.value = inp.value; });
       });
     });
-    const stp = el.querySelector('[data-sim-stop]'); if(stp) stp.addEventListener('click', () => { try{ ShamanNative.cancel(); }catch(e){} });
+    const stp = el.querySelector('[data-sim-stop]'); if(stp) stp.addEventListener('click', () => { simAllStop = true; try{ ShamanNative.cancel(); }catch(e){} setSimAllMsg('⛔ Arrêt demandé…'); });
+    const all = el.querySelector('[data-sim-all]'); if(all) all.addEventListener('click', () => { if(el.dataset.ctx === 'base') baseAutoAll(); else smsAutoAll(); });
     const dl = el.querySelector('[data-sim-delay]');
     if(dl) dl.addEventListener('input', () => simSet({ delay: Math.max(0, parseInt(dl.value) || 0) }));
     const rb = el.querySelector('[data-sim-reset]');
@@ -3244,7 +3313,7 @@ function renderCurrentBaseBatch(){
         ${NATIVE ? `<button class="btn btn-primary" id="baseAutoBtn">⚡ Envoyer ce lot</button>` : `<a class="btn btn-primary" style="text-align:center;text-decoration:none;" href="${linkComma}" id="baseOpenSmsLink">Ouvrir SMS</a>`}
         <button class="btn btn-secondary btn-small" id="baseCopyBtn" style="flex:0 0 auto;">📋 Copier</button>
       </div>
-      ${NATIVE ? `<div class="row" style="margin-bottom:6px;"><button class="btn btn-primary" id="baseAutoAllBtn">⚡⚡ Tout envoyer automatiquement (jusqu'à la fin de la base)</button></div><div id="baseAutoStatus" style="font-size:13px;font-weight:700;margin-bottom:6px;"></div>` : ''}
+      ${NATIVE ? `<div id="baseAutoStatus" style="font-size:13px;font-weight:700;margin-bottom:6px;"></div>` : ''}
       <div class="row">
         <a class="btn btn-secondary btn-small" style="text-align:center;text-decoration:none;flex:1;" href="${linkSemi}">Numéros incorrects ? Autre format</a>
         <button class="btn btn-primary btn-small" id="baseMarkSentBtn" style="flex:0 0 auto;">✓ Lot envoyé — suivant</button>
@@ -3258,33 +3327,6 @@ function renderCurrentBaseBatch(){
     const st = document.getElementById('baseAutoStatus');
     document.getElementById('baseAutoBtn').addEventListener('click', e => {
       nativeRun(e.target, st, numbersClean, body, () => document.getElementById('baseMarkSentBtn').click());
-    });
-    document.getElementById('baseAutoAllBtn').addEventListener('click', e => {
-      const sel = document.getElementById('baseSendSelect').value;
-      const bodyAll = body;
-      const step = () => {
-        const b = db.phoneBases.find(x => x.id === sel);
-        if(!b || b.cursor >= b.numbers.length){ const s2 = document.getElementById('baseAutoStatus'); if(s2) s2.textContent = '✅ Toute la base a été envoyée.'; return; }
-        if(!b.pendingBatch){
-          b.pendingBatch = { start: b.cursor, size: Math.min(Math.max(1, parseInt(document.getElementById('baseBatchSize').value) || 15), b.numbers.length - b.cursor), body: bodyAll, simIdx: 0 };
-          saveDB(); renderCurrentBaseBatch();
-        }
-        const bb = db.phoneBases.find(x => x.id === sel);
-        const nums = bb.numbers.slice(bb.pendingBatch.start, bb.pendingBatch.start + bb.pendingBatch.size).map(cleanNum).filter(n => !isBlocked(n));
-        const s3 = document.getElementById('baseAutoStatus');
-        nativeSend(nums, bb.pendingBatch.body, ev => {
-          const s4 = document.getElementById('baseAutoStatus');
-          if(ev.type === 'progress' && s4) s4.textContent = `⏳ Lot en cours : ${ev.sent + ev.failed} / ${ev.total} · restants dans la base : ${bb.numbers.length - bb.cursor}`;
-          else if(ev.type === 'error' && s4) s4.textContent = '⚠️ ' + ev.message;
-          else if(ev.type === 'done'){
-            if(ev.cancelled){ if(s4) s4.textContent = '⛔ Envoi arrêté.'; return; }
-            if(ev.sent === 0 && ev.failed > 0){ if(s4) s4.textContent = '⚠️ Arrêt : aucun SMS du lot n\'est parti (crédit, réseau ou autorisation ?).'; return; }
-            const m = document.getElementById('baseMarkSentBtn'); if(m) m.click();
-            setTimeout(step, 500);
-          }
-        });
-      };
-      e.target.disabled = true; step();
     });
   }
 
