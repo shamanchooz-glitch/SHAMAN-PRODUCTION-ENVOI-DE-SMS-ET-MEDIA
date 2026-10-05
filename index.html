@@ -1177,10 +1177,6 @@ document.addEventListener('visibilitychange', () => {
   if(document.visibilityState === 'visible' && code && isAutoSyncOn()) syncNow(code, { silent: true });
 });
 
-window.addEventListener('online', () => { if(isAutoSyncOn()) autoPullIfNewer(); });
-document.addEventListener('visibilitychange', () => {
-  if(document.visibilityState === 'visible' && isAutoSyncOn()) autoPullIfNewer();
-});
 
 
 /* ================= APPEL RAPIDE ================= */
@@ -1537,6 +1533,7 @@ smsBody.addEventListener('input', () => {
    Dans l'APK, window.ShamanNative existe : les SMS partent directement,
    sans ouvrir l'appli SMS, avec choix automatique de la SIM. */
 const NATIVE = !!window.ShamanNative;
+const APP_VERSION = '1.3';
 const nativeCbs = {};
 window.onShamanSms = function(json){
   try{ const e = JSON.parse(json); const cb = nativeCbs[e.id]; if(cb) cb(e); if(e.type === 'done') delete nativeCbs[e.id]; }catch(err){}
@@ -1550,18 +1547,28 @@ function nativeSend(numbers, body, onEvent){
   if(r !== 'ok'){ delete nativeCbs[id]; onEvent({ id, type: 'error', message: r }); }
   return id;
 }
+let nativeLastReason = '';
+function nativeDoneText(e){
+  nativeLastReason = e.aborted ? (e.reason || '') : '';
+  let t = e.aborted ? `⚠️ Arrêt : ${e.reason} — ${e.sent} envoyé(s), ${e.failed} échec(s), ${Math.max(0, e.total - e.sent - e.failed)} non traité(s)`
+        : e.cancelled ? `⛔ Envoi arrêté — ${e.sent} envoyé(s)`
+        : `✅ Terminé : ${e.sent} envoyé(s), ${e.failed} échec(s)`;
+  if(e.switched) t += ` · ${e.switched} bascule(s) sur l'autre SIM`;
+  if(e.failedNumbers && e.failedNumbers.length) t += ' · Non envoyés : ' + e.failedNumbers.slice(0, 8).join(', ') + (e.failedNumbers.length > 8 ? '…' : '');
+  return t;
+}
 function cleanNum(n){ return String(n).replace(/\s+/g, ''); }
 // Branche un bouton « envoi automatique » : progression + fin.
 function nativeRun(btn, statusEl, numbers, body, onDone){
   btn.disabled = true;
   statusEl.textContent = '⏳ Envoi en cours…';
   nativeSend(numbers, body, e => {
-    if(e.type === 'progress') statusEl.textContent = `⏳ ${e.sent + e.failed} / ${e.total} (échecs : ${e.failed}) · ${e.sim || ''}`;
+    if(e.type === 'progress') statusEl.textContent = `⏳ ${e.sent + e.failed} / ${e.total} (échecs : ${e.failed}) · ${e.sim || ''}${e.note ? ' · ' + e.note : ''}`;
     else if(e.type === 'error'){ statusEl.textContent = '⚠️ ' + e.message; btn.disabled = false; }
     else if(e.type === 'done'){
-      statusEl.textContent = `✅ Terminé : ${e.sent} envoyé(s), ${e.failed} échec(s)`;
+      statusEl.textContent = nativeDoneText(e);
       btn.disabled = false;
-      if(e.sent > 0 && !e.cancelled && onDone) onDone(e);
+      if(e.sent > 0 && !e.cancelled && !e.aborted && onDone) onDone(e);
     }
   });
 }
@@ -1623,7 +1630,7 @@ async function smsAutoAll(){
         else if(simAllStop || (!btns[i].disabled && Date.now() - t0 > 1500)){ clearInterval(t); res(false); }
       }, 700);
     });
-    if(!ok){ simAllFinish(simAllStop ? '⛔ Envoi arrêté.' : '⚠️ Arrêt : le lot ' + (i + 1) + ' n\'est pas parti (autorisation, SIM ou réseau ?).'); return; }
+    if(!ok){ simAllFinish(simAllStop ? '⛔ Envoi arrêté.' : '⚠️ Arrêt au lot ' + (i + 1) + ' : ' + (nativeLastReason || 'le lot n\'est pas parti (autorisation, SIM ou réseau ?).')); return; }
   }
   simAllFinish(simAllStop ? '⛔ Envoi arrêté.' : '✅ Tous les lots ont été envoyés.');
 }
@@ -1653,10 +1660,11 @@ function baseAutoAll(){
     const nums = b.numbers.slice(pb.start, pb.start + pb.size).map(cleanNum).filter(n => n && !isBlocked(n));
     nativeSend(nums, pb.body, ev => {
       const rest = b.numbers.length - b.cursor;
-      if(ev.type === 'progress') setSimAllMsg(`⏳ ${ev.sent + ev.failed} / ${ev.total} dans le lot · ${ev.sim || ''} · restants : ${rest}`);
+      if(ev.type === 'progress') setSimAllMsg(`⏳ ${ev.sent + ev.failed} / ${ev.total} dans le lot · ${ev.sim || ''}${ev.note ? ' · ' + ev.note : ''} · restants : ${rest}`);
       else if(ev.type === 'error') setSimAllMsg('⚠️ ' + ev.message);
       else if(ev.type === 'done'){
         if(ev.cancelled || simAllStop){ simAllFinish('⛔ Envoi arrêté.'); return; }
+        if(ev.aborted){ simAllFinish(nativeDoneText(ev)); return; }
         if(ev.sent === 0 && ev.failed > 0){ simAllFinish('⚠️ Arrêt : aucun SMS du lot n\'est parti (crédit, réseau ou autorisation ?).'); return; }
         const m = document.getElementById('baseMarkSentBtn'); if(m) m.click();
         setTimeout(step, 500);
@@ -1678,7 +1686,8 @@ function renderSimPickers(){
       <label>Numéro de la SIM 1</label><input type="tel" inputmode="tel" data-sim-num="sim1" value="${escapeHtml(S.sim1)}">
       <label>Numéro de la SIM 2</label><input type="tel" inputmode="tel" data-sim-num="sim2" value="${escapeHtml(S.sim2)}">
       ${NATIVE ? `<div style="font-size:12.5px;margin-top:8px;">${nativeSims().map(x => '📶 SIM ' + (x.slot + 1) + ' : ' + escapeHtml(x.name || '') + (x.number ? ' · ' + escapeHtml(x.number) : '')).join('<br>') || '⚠️ Aucune SIM détectée (autorisez « Téléphone » pour l\'app).'}</div>
-      <label>Pause entre deux SMS (secondes)</label><input type="number" min="0" max="60" data-sim-delay value="${S.delay}"><div class="row" style="gap:8px;margin-top:12px;flex-wrap:wrap;"><button type="button" class="btn btn-secondary btn-small" data-sim-stop style="flex:1 1 140px;">⛔ Arrêter tous les envois en cours</button>${(el.dataset.ctx === 'sms' || el.dataset.ctx === 'base') ? `<button type="button" class="btn btn-primary btn-small" data-sim-all style="flex:1 1 140px;" ${simAllRunning ? 'disabled' : ''}>⚡ Tout envoyer automatiquement</button>` : ''}</div><div class="sim-all-status" style="font-size:13px;font-weight:700;margin-top:8px;">${escapeHtml(simAllMsg)}</div>` : ''}
+      <div style="font-size:12px;color:var(--text-dim);margin-top:6px;">📦 Version de l'application : ${APP_VERSION}</div>
+      <label>Pause entre deux SMS (secondes)</label><input type="number" min="0" max="60" data-sim-delay value="${S.delay}"><div class="row" style="gap:8px;margin-top:12px;flex-wrap:nowrap;align-items:stretch;"><button type="button" class="btn btn-secondary btn-small" data-sim-stop style="flex:1 1 0;min-width:0;width:auto;margin:0;padding:10px 6px;font-size:12.5px;line-height:1.25;">⛔ Arrêter tous les envois en cours</button>${(el.dataset.ctx === 'sms' || el.dataset.ctx === 'base') ? `<button type="button" class="btn btn-primary btn-small" data-sim-all style="flex:1 1 0;min-width:0;width:auto;margin:0;padding:10px 6px;font-size:12.5px;line-height:1.25;" ${simAllRunning ? 'disabled' : ''}>⚡ Tout envoyer automatiquement</button>` : ''}</div><div class="sim-all-status" style="font-size:13px;font-weight:700;margin-top:8px;">${escapeHtml(simAllMsg)}</div>` : ''}
       ${next && !NATIVE ? `<div style="font-size:12.5px;color:#C43E71;font-weight:700;margin-top:8px;">${escapeHtml(next)}</div><button type="button" class="btn btn-secondary btn-small" data-sim-reset style="margin-top:6px;">↺ Recommencer par la SIM 1</button>` : ''}`;
     // Les boutons radio de chaque bloc doivent former un groupe distinct.
     const grp = 'simMode-' + Math.random().toString(36).slice(2);
@@ -2743,7 +2752,7 @@ function rbAuto(){
   if(NATIVE){
     it.j.tried=Date.now(); saveDB(); rbAwait=it.j.id; rbAwaitAt=Date.now();
     nativeSend(it.c.nums.map(cleanNum), it.msg, ev=>{
-      if(ev.type==='done'){ rbAwait=null; if(ev.sent>0&&!ev.cancelled) rbSent(it.r,it.j); }
+      if(ev.type==='done'){ rbAwait=null; if(ev.sent>0&&!ev.cancelled&&!ev.aborted) rbSent(it.r,it.j); }
       else if(ev.type==='error'){ rbAwait=null; }
     });
     return;
