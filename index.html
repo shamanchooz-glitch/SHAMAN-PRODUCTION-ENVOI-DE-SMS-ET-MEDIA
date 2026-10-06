@@ -630,7 +630,8 @@
     <div class="card">
       <h2>🤖 À envoyer maintenant (<span id="robotDueCount">0</span>)</h2>
       <p class="dim" style="font-size:12px;margin:0 0 8px;">Le robot ouvre l'appli SMS avec le lot prêt (app ouverte) : vous n'avez qu'à envoyer, puis revenir. Au retour, le lot est marqué envoyé et le suivant s'ouvre.</p>
-      <div id="robotDue"><div class="empty">Rien à envoyer pour le moment.</div></div>
+      <div id="robotLive" style="font-size:13px;font-weight:700;margin:8px 0;"></div>
+    <div id="robotDue"><div class="empty">Rien à envoyer pour le moment.</div></div>
     </div>
     <div class="card"><h2>Derniers envois</h2><div id="robotLog"><div class="empty">Aucun envoi.</div></div></div>
     <div class="card">
@@ -899,8 +900,17 @@ function renderTrashList(){
 }
 // Numéro bloqué ? Comparaison sur la forme normalisée (+indicatif) pour que
 // "0748935686" et "+2250748935686" soient reconnus comme le même numéro.
+let _blkArr = null, _blkLen = -1, _blkEdge = '', _blkSet = new Set();
+function blockedSetNow(){
+  const a = db.blockedNumbers, n = a.length;
+  const edge = n ? (a[0].number + '|' + a[n - 1].number + '|' + (a[n >> 1].number)) : '';
+  if(a !== _blkArr || n !== _blkLen || edge !== _blkEdge){
+    _blkSet = new Set(a.map(b => b.number)); _blkArr = a; _blkLen = n; _blkEdge = edge;
+  }
+  return _blkSet;
+}
 function isBlocked(normalizedNumber){
-  return db.blockedNumbers.some(b => b.number === normalizedNumber);
+  return blockedSetNow().has(normalizedNumber);
 }
 // Retire d'une base tout numéro devenu bloqué entre-temps (ex. bloqué après
 // coup, ou arrivé via une synchro d'un autre téléphone). Ajuste le curseur
@@ -1533,24 +1543,25 @@ smsBody.addEventListener('input', () => {
    Dans l'APK, window.ShamanNative existe : les SMS partent directement,
    sans ouvrir l'appli SMS, avec choix automatique de la SIM. */
 const NATIVE = !!window.ShamanNative;
-const APP_VERSION = '1.4';
+const APP_VERSION = '1.6';
 const nativeCbs = {};
 window.onShamanSms = function(json){
   try{ const e = JSON.parse(json); const cb = nativeCbs[e.id]; if(cb) cb(e); if(e.type === 'done') delete nativeCbs[e.id]; }catch(err){}
 };
 function nativeSims(){ try{ return JSON.parse(ShamanNative.getSims()); }catch(e){ return []; } }
-function nativeSend(numbers, body, onEvent, bodies){
-  const id = 'n' + Date.now() + Math.random().toString(36).slice(2, 6);
+function nativeSend(numbers, body, onEvent, bodies, extra){
+  const id = (extra && extra.id) || ('n' + Date.now() + Math.random().toString(36).slice(2, 6));
   nativeCbs[id] = onEvent;
   const S = simGet();
-  const r = ShamanNative.sendSms(JSON.stringify({ id, numbers, body, bodies, mode: S.mode, delay: S.delay }));
+  const r = ShamanNative.sendSms(JSON.stringify({ id, numbers, body, bodies, mode: S.mode, delay: S.delay, stopAt: (extra && extra.stopAt) || 0 }));
   if(r !== 'ok'){ delete nativeCbs[id]; onEvent({ id, type: 'error', message: r }); }
   return id;
 }
 let nativeLastReason = '';
 function nativeDoneText(e){
   nativeLastReason = e.aborted ? (e.reason || '') : '';
-  let t = e.aborted ? `⚠️ Arrêt : ${e.reason} — ${e.sent} envoyé(s), ${e.failed} échec(s), ${Math.max(0, e.total - e.sent - e.failed)} non traité(s)`
+  let t = e.paused ? `⏸ Pause (heures calmes) — ${e.sent} envoyé(s), le robot reprend tout seul ensuite`
+        : e.aborted ? `⚠️ Arrêt : ${e.reason} — ${e.sent} envoyé(s), ${e.failed} échec(s), ${Math.max(0, e.total - e.sent - e.failed)} non traité(s)`
         : e.cancelled ? `⛔ Envoi arrêté — ${e.sent} envoyé(s)`
         : `✅ Terminé : ${e.sent} envoyé(s), ${e.failed} échec(s)`;
   if(e.switched) t += ` · ${e.switched} bascule(s) sur l'autre SIM`;
@@ -1571,7 +1582,7 @@ function nativeSendLots(lots, onProgress, onFinish){
   nativeSend(flat, '', ev => {
     if(ev.type === 'progress'){ advance(ev.sent + ev.failed); onProgress(ev, Math.min(next + 1, lots.length), lots.length); }
     else if(ev.type === 'error'){ onProgress(ev, next + 1, lots.length); if(ev.fatal) onFinish(ev); }
-    else if(ev.type === 'done'){ if(!ev.aborted && !ev.cancelled) advance(Infinity); onFinish(ev); }
+    else if(ev.type === 'done'){ if(!ev.aborted && !ev.cancelled && !ev.paused) advance(Infinity); onFinish(ev); }
   }, bodies);
 }
 function cleanNum(n){ return String(n).replace(/\s+/g, ''); }
@@ -1602,7 +1613,7 @@ if(NATIVE){
    Réglages gardés sur CE téléphone (localStorage), pas synchronisés,
    car les cartes SIM sont propres à chaque appareil. */
 const SIM_KEY = 'shaman_sim_v1';
-const SIM_DEFAULT = { mode: 'alt', sim1: '07 49 97 09 18', sim2: '07 48 93 56 86', seq: 0, delay: 3 };
+const SIM_DEFAULT = { mode: 'alt', sim1: '07 49 97 09 18', sim2: '07 48 93 56 86', seq: 0, delay: 3, keep: true };
 function simGet(){
   try{ return Object.assign({}, SIM_DEFAULT, JSON.parse(localStorage.getItem(SIM_KEY) || '{}')); }
   catch(e){ return Object.assign({}, SIM_DEFAULT); }
@@ -1692,6 +1703,8 @@ function renderSimPickers(){
       <label>Numéro de la SIM 2</label><input type="tel" inputmode="tel" data-sim-num="sim2" value="${escapeHtml(S.sim2)}">
       ${NATIVE ? `<div style="font-size:12.5px;margin-top:8px;">${nativeSims().map(x => '📶 SIM ' + (x.slot + 1) + ' : ' + escapeHtml(x.name || '') + (x.number ? ' · ' + escapeHtml(x.number) : '')).join('<br>') || '⚠️ Aucune SIM détectée (autorisez « Téléphone » pour l\'app).'}</div>
       <div style="font-size:12px;color:var(--text-dim);margin-top:6px;">📦 Version de l'application : ${APP_VERSION}</div>
+      <label class="check-row" style="margin-top:10px;"><input type="checkbox" data-sim-keep ${S.keep !== false ? 'checked' : ''}> 🔋 Garder l'app active en arrière-plan (les envois continuent écran éteint, pendant un appel ou dans une autre appli)</label>
+      <button type="button" class="btn btn-secondary btn-small" data-sim-battery style="margin-top:6px;">${(()=>{ try{ return ShamanNative.isBatteryExempt() ? '✅ Batterie : sans restriction' : '⚙️ Autoriser sans restriction de batterie'; }catch(e){ return '⚙️ Batterie'; } })()}</button>
       <label>Pause entre deux SMS (secondes)</label><input type="number" min="0" max="60" data-sim-delay value="${S.delay}"><div class="row" style="gap:8px;margin-top:12px;flex-wrap:nowrap;align-items:stretch;"><button type="button" class="btn btn-secondary btn-small" data-sim-stop style="flex:1 1 0;min-width:0;width:auto;margin:0;padding:10px 6px;font-size:12.5px;line-height:1.25;">⛔ Arrêter tous les envois en cours</button>${(el.dataset.ctx === 'sms' || el.dataset.ctx === 'base') ? `<button type="button" class="btn btn-primary btn-small" data-sim-all style="flex:1 1 0;min-width:0;width:auto;margin:0;padding:10px 6px;font-size:12.5px;line-height:1.25;" ${simAllRunning ? 'disabled' : ''}>⚡ Tout envoyer automatiquement</button>` : ''}</div><div class="sim-all-status" style="font-size:13px;font-weight:700;margin-top:8px;">${escapeHtml(simAllMsg)}</div>` : ''}
       ${next && !NATIVE ? `<div style="font-size:12.5px;color:#C43E71;font-weight:700;margin-top:8px;">${escapeHtml(next)}</div><button type="button" class="btn btn-secondary btn-small" data-sim-reset style="margin-top:6px;">↺ Recommencer par la SIM 1</button>` : ''}`;
     // Les boutons radio de chaque bloc doivent former un groupe distinct.
@@ -1708,6 +1721,8 @@ function renderSimPickers(){
     });
     const stp = el.querySelector('[data-sim-stop]'); if(stp) stp.addEventListener('click', () => { simAllStop = true; setSimAllMsg('⛔ Arrêt demandé…'); try{ ShamanNative.cancel(); }catch(e){} setTimeout(() => { if(simAllRunning) simAllFinish('⛔ Envoi arrêté.'); }, 4000); });
     const all = el.querySelector('[data-sim-all]'); if(all) all.addEventListener('click', () => { if(el.dataset.ctx === 'base') baseAutoAll(); else smsAutoAll(); });
+    const kp = el.querySelector('[data-sim-keep]'); if(kp) kp.addEventListener('change', () => { simSet({ keep: kp.checked }); try{ ShamanNative.setKeepAlive(kp.checked); }catch(e){} renderSimPickers(); });
+    const bt = el.querySelector('[data-sim-battery]'); if(bt) bt.addEventListener('click', () => { try{ ShamanNative.requestBatteryExemption(); }catch(e){} setTimeout(renderSimPickers, 1500); });
     const dl = el.querySelector('[data-sim-delay]');
     if(dl) dl.addEventListener('input', () => simSet({ delay: Math.max(0, parseInt(dl.value) || 0) }));
     const rb = el.querySelector('[data-sim-reset]');
@@ -1715,6 +1730,7 @@ function renderSimPickers(){
   });
 }
 renderSimPickers();
+if(NATIVE){ try{ ShamanNative.setKeepAlive(simGet().keep !== false); }catch(e){} }
 
 const smsSourceRadios = () => Array.from(document.querySelectorAll('input[name="smsSource"]'));
 function getSmsSource(){ const c = smsSourceRadios().find(r => r.checked); return c ? c.value : 'contacts'; }
@@ -2716,7 +2732,7 @@ function rbGenerate(){
   return ch;
 }
 function rbList(r){
-  const bl=new Set(db.blockedNumbers.map(b=>b.number)), ids=r.groupIds||[];
+  const bl=blockedSetNow(), ids=r.groupIds||[];
   const l=r.source==='numbers'?r.numbers:db.contacts.filter(c=>c.phone&&(ids.includes('all')||ids.includes(c.group))).map(c=>c.phone);
   return l.filter(n=>!bl.has(n.replace(/\s+/g,'')));
 }
@@ -2750,22 +2766,130 @@ function rbUndo(id){
   if(r.source==='base'){const b=db.phoneBases.find(x=>x.id===r.baseId);if(b){b.cursor=l.from;b.updatedAt=Date.now();}} else j.idx=l.from;
   j.status='todo'; j.tried=0; j.updatedAt=Date.now(); saveDB(); renderRobot();
 }
+const RB_DESC_KEY = 'shaman_rb_drain';
+function rbSetLive(t){ const e = document.getElementById('robotLive'); if(e) e.textContent = t; }
+function rbSaveDesc(d){ try{ localStorage.setItem(RB_DESC_KEY, JSON.stringify(d)); }catch(e){} }
+function rbQuietStopAt(){
+  const S = db.robotSettings, f = t => { const [a, b] = t.split(':').map(Number); return a * 60 + b; };
+  const a = f(S.quietFrom), b = f(S.quietTo); if(a === b) return 0;
+  const d = new Date(); d.setHours(Math.floor(a / 60), a % 60, 0, 0);
+  if(d.getTime() <= Date.now()) d.setDate(d.getDate() + 1);
+  return d.getTime();
+}
+// Enregistre un lot comme envoyé (même effet que « ✓ Envoyé », sans mettre la tâche à « terminée » trop tôt).
+function rbMarkLot(ruleId, jobId, start, n, last){
+  const j = db.robotJobs.find(x => x.id === jobId), r = db.robotRules.find(x => x.id === ruleId); if(!j || !r) return;
+  (j.log = j.log || []).push({ t: Date.now(), n, from: start });
+  if(r.source === 'base'){ const b = db.phoneBases.find(x => x.id === r.baseId); if(b){ b.cursor = start + n; b.updatedAt = Date.now(); } }
+  else j.idx = start + n;
+  if(last){
+    j.status = 'done';
+    // Passage complet terminé : les autres horaires déjà échus de la même liste ne refont pas un 2e passage tout de suite.
+    db.robotJobs.forEach(o => {
+      if(o === j || o.status !== 'todo' || o.at > Date.now() + 6e4) return;
+      const rr = db.robotRules.find(x => x.id === o.ruleId);
+      if(o.ruleId === ruleId || (rr && r.source === 'base' && rr.source === 'base' && rr.baseId === r.baseId)){ o.status = 'skipped'; o.updatedAt = Date.now(); }
+    });
+  }
+  j.tried = 0; j.updatedAt = Date.now(); saveDB(); renderRobot();
+}
+function rbDescAdvance(d, processed){
+  let cum = 0, changed = false;
+  for(let k = 0; k < d.lots.length; k++){
+    cum += d.lots[k].m;
+    if(k < d.marked) continue;
+    if(processed >= cum){ const L = d.lots[k]; rbMarkLot(d.ruleId, d.jobId, L.start, L.n, d.complete && k === d.lots.length - 1); d.marked = k + 1; changed = true; }
+    else break;
+  }
+  if(changed) rbSaveDesc(d);
+}
+function rbEnd(d, ev){
+  try{ localStorage.removeItem(RB_DESC_KEY); }catch(e){}
+  delete nativeCbs[d.nid];
+  rbAwait = null;
+  const j = db.robotJobs.find(x => x.id === d.jobId);
+  if(j){ j.tried = 0; if(ev.aborted || ev.type === 'error') j.retryAt = Date.now() + 10 * 60000; saveDB(); }
+  rbSetLive(ev.type === 'error' ? '⚠️ ' + (ev.message || 'Envoi impossible') : nativeDoneText(ev));
+  renderRobot();
+}
+function rbOnEvent(d){
+  return ev => {
+    if(ev.type === 'progress'){
+      rbDescAdvance(d, ev.sent + ev.failed);
+      rbSetLive(`⏳ Robot : ${ev.sent + ev.failed} / ${ev.total} SMS · lot ${Math.min(d.marked + 1, d.lots.length)} / ${d.lots.length} · ${ev.sim || ''}${ev.note ? ' · ' + ev.note : ''}`);
+    } else if(ev.type === 'error'){ rbEnd(d, ev); }
+    else if(ev.type === 'done'){
+      if(!ev.aborted && !ev.cancelled && !ev.paused) rbDescAdvance(d, Infinity);
+      rbEnd(d, ev);
+    }
+  };
+}
+// Un seul lancement = TOUS les lots restants de cette tâche, dans une seule tâche Android.
+function rbDrain(it, manual){
+  const r = it.r, j = it.j;
+  let lots = [], src, startOf;
+  if(r.source === 'base'){
+    const b = db.phoneBases.find(x => x.id === r.baseId); if(!b) return;
+    stripBlockedFromBase(b); if(!b.numbers.length) return;
+    if(b.cursor >= b.numbers.length){ b.cursor = 0; b.updatedAt = Date.now(); }
+    src = b.numbers; startOf = b.cursor;
+  } else { src = rbList(r); startOf = j.idx || 0; }
+  const size = Math.max(1, r.batchSize || 15);
+  for(let st = startOf; st < src.length; st += size) lots.push({ start: st, n: Math.min(size, src.length - st) });
+  if(!lots.length) return;
+  // Plafond du jour (si réglé) : on n'envoie que ce qui reste autorisé
+  let complete = true;
+  const ql = rbQuotaLeft();
+  if(ql !== Infinity){
+    let cum = 0, keep = [];
+    for(const L of lots){ if(cum + L.n > ql) break; keep.push(L); cum += L.n; }
+    if(keep.length < lots.length) complete = false;
+    lots = keep; if(!lots.length){ rbSetLive('⏸ Plafond du jour atteint.'); return; }
+  }
+  const nums = [], bodies = [];
+  const msg = it.msg;
+  lots.forEach(L => {
+    const arr = src.slice(L.start, L.start + L.n).map(cleanNum).filter(n => n && !isBlocked(n));
+    L.m = arr.length; arr.forEach(n => { nums.push(n); bodies.push(msg); });
+  });
+  const nid = 'rb' + Date.now();
+  const d = { nid, jobId: j.id, ruleId: r.id, lots, marked: 0, complete };
+  rbSaveDesc(d);
+  rbAwait = j.id; rbAwaitAt = Date.now();
+  nativeCbs[nid] = rbOnEvent(d);
+  rbDescAdvance(d, 0);
+  if(!nums.length){ rbEnd(d, { type: 'done', sent: 0, failed: 0, total: 0 }); return; }
+  rbSetLive(`⏳ Robot : démarrage — ${nums.length} SMS en ${lots.length} lot(s)…`);
+  const stopAt = manual ? 0 : rbQuietStopAt();
+  const res = ShamanNative.sendSms(JSON.stringify({ id: nid, numbers: nums, body: '', bodies, mode: simGet().mode, delay: simGet().delay, stopAt }));
+  if(res !== 'ok') rbOnEvent(d)({ type: 'error', message: res });
+}
+// Après une pause de la page ou un rechargement : rattrape ce que le téléphone a envoyé entre-temps.
+function rbRecover(){
+  if(!NATIVE) return;
+  let d = null; try{ d = JSON.parse(localStorage.getItem(RB_DESC_KEY) || 'null'); }catch(e){}
+  if(!d || nativeCbs[d.nid]) return;
+  let st; try{ st = JSON.parse(ShamanNative.jobState(d.nid)); }catch(e){ st = { known: false }; }
+  if(!st.known){ try{ localStorage.removeItem(RB_DESC_KEY); }catch(e){} rbAwait = null; return; }
+  rbAwait = d.jobId; rbAwaitAt = Date.now();
+  rbDescAdvance(d, st.sent + st.failed);
+  if(st.done || !st.running) rbEnd(d, Object.assign({ type: 'done', total: st.total }, st, { aborted: st.aborted || (!st.done && !st.running), reason: st.aborted ? 'Envoi interrompu.' : 'Envoi interrompu (application fermée ?).' }));
+  else nativeCbs[d.nid] = rbOnEvent(d);
+}
 function rbAuto(){
   const S=db.robotSettings;
-  if(rbAwait&&Date.now()-rbAwaitAt>6e5) rbAwait=null;
-  if((!S.autoOpen&&!NATIVE)||document.hidden||rbAwait||rbQuiet()||rbQuotaLeft()<=0) return;
-  const it=rbItems().find(x=>x.c); if(!it||it.j.tried) return;
+  if(rbAwait&&Date.now()-rbAwaitAt>6e5&&!NATIVE) rbAwait=null;
   if(NATIVE){
-    it.j.tried=Date.now(); saveDB(); rbAwait=it.j.id; rbAwaitAt=Date.now();
-    nativeSend(it.c.nums.map(cleanNum), it.msg, ev=>{
-      if(ev.type==='done'){ rbAwait=null; if(ev.sent>0&&!ev.cancelled&&!ev.aborted) rbSent(it.r,it.j); }
-      else if(ev.type==='error'){ rbAwait=null; }
-    });
-    return;
+    if(rbAwait||rbQuiet()||rbQuotaLeft()<=0) return;
+    const it=rbItems().find(x=>x.c&&!(x.j.retryAt>Date.now())); if(!it) return;
+    rbDrain(it,false); return;
   }
+  if(!S.autoOpen||document.hidden||rbAwait||rbQuiet()||rbQuotaLeft()<=0) return;
+  const it=rbItems().find(x=>x.c); if(!it||it.j.tried) return;
   it.j.tried=Date.now(); saveDB(); rbAwait=it.j.id; rbAwaitAt=Date.now(); rbHid=false;
   location.href='sms:'+it.c.nums.map(x=>x.replace(/\s+/g,'')).join(',')+'?body='+encodeURIComponent(it.msg);
 }
+function setHtml(el,h){ if(el.dataset.h!==h){ el.dataset.h=h; el.innerHTML=h; } }
 function setOpts(el,h){ if(el.innerHTML!==h){const v=el.value;el.innerHTML=h;if([...el.options].some(o=>o.value===v))el.value=v;} }
 function renderRobot(){
   rbGenerate(); const S=db.robotSettings, items=rbItems();
@@ -2773,7 +2897,7 @@ function renderRobot(){
   const ql=rbQuotaLeft(), quotaBanner = ql<=0 ? '<div class="batch" style="border-color:#c43e3e;"><b>⏸ Quota quotidien atteint.</b><div class="dim" style="font-size:12px;">L\'ouverture automatique est en pause jusqu\'à demain (protection anti-spam). Vous pouvez toujours envoyer manuellement ci-dessous.</div></div>' : '';
   $r('robotQuotaInfo').textContent = db.robotSettings.maxPerDay>0 ? `Envoyés aujourd'hui : ${rbSentToday()} / ${db.robotSettings.maxPerDay}` : `Envoyés aujourd'hui : ${rbSentToday()} (illimité)`;
   const el=$r('robotDue');
-  el.innerHTML=quotaBanner+(items.length?items.map(({j,r,c,err,wait,msg})=>{
+  const dueHtml=quotaBanner+(items.length?items.map(({j,r,c,err,wait,msg})=>{
     const late=Date.now()-j.at>36e5, hh=new Date(j.at).toLocaleString('fr-FR',{weekday:'short',hour:'2-digit',minute:'2-digit'}), nm=escapeHtml(r.name)+' · '+hh;
     if(wait) return `<div class="batch"><b>${nm}</b><div class="dim" style="font-size:12px;">⏳ En attente de l'envoi précédent de cette base.</div></div>`;
     if(err) return `<div class="batch"><b>${nm}</b><div class="dim">${err}</div><button class="btn btn-secondary btn-small" data-rb-skip="${j.id}">Ignorer</button></div>`;
@@ -2781,28 +2905,30 @@ function renderRobot(){
     return `<div class="batch"><div class="batch-head"><span class="label">${late?'⚠️ ':'🔔 '}${nm}</span><span class="count">${n.length} n°</span></div>
       ${rbSenderFor(r,j)?`<div style="font-size:12.5px;color:#C43E71;font-weight:700;">📱 Depuis : ${escapeHtml(rbSenderFor(r,j))}</div>`:''}
       <div style="font-size:12.5px;word-break:break-all;margin:6px 0;">${escapeHtml(n.join(', '))}</div>
-      <div class="row"><a class="btn btn-primary" style="text-align:center;text-decoration:none;" data-rb-open="${j.id}" href="sms:${n.join(',')}${q}">Ouvrir SMS</a>
+      <div class="row">${NATIVE?`<button class="btn btn-primary" data-rb-drain="${j.id}">⚡ Envoyer tous les lots</button>`:`<a class="btn btn-primary" style="text-align:center;text-decoration:none;" data-rb-open="${j.id}" href="sms:${n.join(',')}${q}">Ouvrir SMS</a>`}
       <button class="btn btn-secondary btn-small" data-rb-ok="${j.id}">✓ Envoyé</button></div>
       <div class="row" style="margin-top:6px;"><a class="btn btn-secondary btn-small" style="text-align:center;text-decoration:none;flex:1;" href="sms:${n.join(';')}${q}">Autre format</a>
       <button class="btn btn-secondary btn-small" data-rb-skip="${j.id}" style="flex:0 0 auto;">Passer</button></div></div>`;
   }).join(''):(quotaBanner?'':'<div class="empty">Rien à envoyer pour le moment.</div>'));
+  setHtml(el,dueHtml);
   const J=id=>db.robotJobs.find(x=>x.id===id);
   el.querySelectorAll('[data-rb-open]').forEach(b=>b.onclick=()=>{rbAwait=b.dataset.rbOpen;rbAwaitAt=Date.now();rbHid=false;});
-  el.querySelectorAll('[data-rb-ok]').forEach(b=>b.onclick=()=>{const j=J(b.dataset.rbOk),r=j&&db.robotRules.find(x=>x.id===j.ruleId);if(r)rbSent(r,j);});
+  el.querySelectorAll('[data-rb-drain]').forEach(b=>b.onclick=()=>{ if(rbAwait){ alert('Un envoi automatique est déjà en cours.'); return; } const it=rbItems().find(x=>x.j.id===b.dataset.rbDrain&&x.c); if(it) rbDrain(it,true); });
+  el.querySelectorAll('[data-rb-ok]').forEach(b=>b.onclick=()=>{const j=J(b.dataset.rbOk),r=j&&db.robotRules.find(x=>x.id===j.ruleId);if(NATIVE&&rbAwait===b.dataset.rbOk){alert('Un envoi automatique est en cours pour ce lot.');return;}if(r)rbSent(r,j);});
   el.querySelectorAll('[data-rb-skip]').forEach(b=>b.onclick=()=>{const j=J(b.dataset.rbSkip);if(j){j.status='skipped';j.updatedAt=Date.now();saveDB();renderRobot();}});
   const logs=db.robotJobs.flatMap(j=>(j.log||[]).map(l=>({j,l}))).sort((a,b)=>b.l.t-a.l.t).slice(0,8);
-  $r('robotLog').innerHTML=logs.length?logs.map(({j,l},i)=>{const r=db.robotRules.find(x=>x.id===j.ruleId)||{name:'?'};
-    return `<div class="group-item"><div class="meta">${new Date(l.t).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})} · ${escapeHtml(r.name)} · ${l.n} numéros ${i===0?`<button class="btn btn-secondary btn-small" data-rb-undo="${j.id}">↩ Annuler</button>`:''}</div></div>`;}).join(''):'<div class="empty">Aucun envoi.</div>';
+  setHtml($r('robotLog'),logs.length?logs.map(({j,l},i)=>{const r=db.robotRules.find(x=>x.id===j.ruleId)||{name:'?'};
+    return `<div class="group-item"><div class="meta">${new Date(l.t).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})} · ${escapeHtml(r.name)} · ${l.n} numéros ${i===0?`<button class="btn btn-secondary btn-small" data-rb-undo="${j.id}">↩ Annuler</button>`:''}</div></div>`;}).join(''):'<div class="empty">Aucun envoi.</div>');
   $r('robotLog').querySelectorAll('[data-rb-undo]').forEach(b=>b.onclick=()=>rbUndo(b.dataset.rbUndo));
   $r('robotCount').textContent=db.robotRules.length;
   setOpts($r('rbBase'),db.phoneBases.map(b=>`<option value="${b.id}">${escapeHtml(b.name)} (${b.numbers.length} n°)</option>`).join(''));
   const gw=$r('rbGroupsWrap'), gh=[{id:'all',name:'Tous les contacts'},...db.groups].map(g=>`<label class="check-row"><input type="checkbox" value="${g.id}"> ${escapeHtml(g.name)}</label>`).join('');
   if(gw.dataset.h!==gh){const on=[...gw.querySelectorAll('input:checked')].map(i=>i.value);gw.innerHTML=gh;gw.dataset.h=gh;gw.querySelectorAll('input').forEach(i=>i.checked=on.includes(i.value));}
   const rl=$r('robotRules');
-  rl.innerHTML=db.robotRules.length?db.robotRules.map(r=>{const sc=rbSched(r);return `<div class="group-item"><div class="name">${r.active?'🟢':'⏸'} ${escapeHtml(r.name)}</div>
+  setHtml(rl,db.robotRules.length?db.robotRules.map(r=>{const sc=rbSched(r);return `<div class="group-item"><div class="name">${r.active?'🟢':'⏸'} ${escapeHtml(r.name)}</div>
     <div class="meta">${r.useDefault?'Par défaut · ':''}${sc.days.map(d=>RB_DAYS[d]).join(' ')} · ${sc.times.join(', ')}</div>
     <div class="meta">${r.source==='base'?'Base « '+escapeHtml((db.phoneBases.find(b=>b.id===r.baseId)||{}).name||'?')+' » (en boucle)':r.source==='groups'?'Contacts / groupes':r.numbers.length+' numéros'} · lots de ${r.batchSize} · ${escapeHtml(r.body.slice(0,60))}</div>
-    <div class="row" style="margin-top:6px;gap:6px;flex-wrap:wrap;"><button class="btn btn-primary btn-small" data-rb-now="${r.id}">▶ Lancer maintenant</button><button class="btn btn-secondary btn-small" data-rb-tog="${r.id}">${r.active?'Pause':'Réactiver'}</button><button class="btn btn-danger btn-small" data-rb-del="${r.id}">Supprimer</button></div></div>`;}).join(''):'<div class="empty">Aucune règle.</div>';
+    <div class="row" style="margin-top:6px;gap:6px;flex-wrap:wrap;"><button class="btn btn-primary btn-small" data-rb-now="${r.id}">▶ Lancer maintenant</button><button class="btn btn-secondary btn-small" data-rb-tog="${r.id}">${r.active?'Pause':'Réactiver'}</button><button class="btn btn-danger btn-small" data-rb-del="${r.id}">Supprimer</button></div></div>`;}).join(''):'<div class="empty">Aucune règle.</div>');
   const R=id=>db.robotRules.find(x=>x.id===id);
   rl.querySelectorAll('[data-rb-now]').forEach(b=>b.onclick=()=>{db.robotJobs.push({id:b.dataset.rbNow+'_now_'+Date.now(),ruleId:b.dataset.rbNow,at:Date.now(),status:'todo',v:R(b.dataset.rbNow).seq||0,updatedAt:Date.now()});const r=R(b.dataset.rbNow);r.seq=(r.seq||0)+1;saveDB();renderRobot();rbAuto();});
   rl.querySelectorAll('[data-rb-tog]').forEach(b=>b.onclick=()=>{const r=R(b.dataset.rbTog);r.active=!r.active;r.updatedAt=Date.now();if(r.active)r.createdAt=Date.now();saveDB();renderRobot();});
@@ -2848,8 +2974,10 @@ document.addEventListener('visibilitychange',()=>{
   if(document.hidden){ if(rbAwait) rbHid=true; return; }
   if(rbAwait&&rbHid){ const j=db.robotJobs.find(x=>x.id===rbAwait), r=j&&db.robotRules.find(x=>x.id===j.ruleId); rbAwait=null; rbHid=false;
     if(j&&r&&j.status==='todo'&&db.robotSettings.autoConfirm) rbSent(r,j); }
+  rbRecover();
   setTimeout(rbTick,1500);
 });
+rbRecover();
 rbTick();
 
 /* ================= BASES DE NUMÉROS ================= */
