@@ -1543,7 +1543,7 @@ smsBody.addEventListener('input', () => {
    Dans l'APK, window.ShamanNative existe : les SMS partent directement,
    sans ouvrir l'appli SMS, avec choix automatique de la SIM. */
 const NATIVE = !!window.ShamanNative;
-const APP_VERSION = '1.6';
+const APP_VERSION = '1.7';
 const nativeCbs = {};
 window.onShamanSms = function(json){
   try{ const e = JSON.parse(json); const cb = nativeCbs[e.id]; if(cb) cb(e); if(e.type === 'done') delete nativeCbs[e.id]; }catch(err){}
@@ -1584,6 +1584,47 @@ function nativeSendLots(lots, onProgress, onFinish){
     else if(ev.type === 'error'){ onProgress(ev, next + 1, lots.length); if(ev.fatal) onFinish(ev); }
     else if(ev.type === 'done'){ if(!ev.aborted && !ev.cancelled && !ev.paused) advance(Infinity); onFinish(ev); }
   }, bodies);
+}
+function journalLabel(code){
+  const c = parseInt(code);
+  if(c === 0) return ['✅', 'Envoyé'];
+  if(c === -2) return ['⏳', "Android n'a pas répondu (confirmation de limite SMS ?)"];
+  if(c === 3) return ['❌', 'Numéro invalide'];
+  if(c === 1) return ['❌', 'Échec (crédit, forfait SMS ou réseau)'];
+  if(c === 2) return ['❌', 'Radio éteinte (mode avion ?)'];
+  if(c === 4) return ['❌', 'Pas de réseau'];
+  if(c === 5) return ['⛔', "Limite d'envoi d'Android atteinte"];
+  return ['❌', 'Erreur ' + c];
+}
+function renderJournal(){
+  const box = document.getElementById('journalBox'); if(!box) return;
+  let arr = []; try{ arr = JSON.parse(ShamanNative.getJournal(200)); }catch(e){}
+  if(!arr.length){ box.innerHTML = '<div class="empty">Aucun envoi enregistré pour le moment.</div>'; return; }
+  const rows = arr.slice().reverse().map(l => l.split('|'));
+  const hourAgo = Date.now() - 3600000;
+  let ok = 0, ko = 0;
+  rows.forEach(r => { if(+r[0] >= hourAgo){ if(parseInt(r[3]) === 0) ok++; else ko++; } });
+  box.innerHTML = `<div style="font-weight:700;margin-bottom:8px;">Dernière heure : ${ok} envoyé(s), ${ko} échec(s)</div>` +
+    rows.slice(0, 60).map(r => {
+      const [ic, txt] = journalLabel(r[3]);
+      const t = new Date(+r[0]).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      return `<div style="font-size:12.5px;padding:5px 0;border-bottom:1px solid var(--line, #cde);">${ic} <b>${escapeHtml(t)}</b> · ${escapeHtml(r[1])} · ${escapeHtml(r[2])}<br><span style="color:var(--text-dim);">${escapeHtml(txt)}</span></div>`;
+    }).join('');
+}
+if(NATIVE){
+  document.addEventListener('DOMContentLoaded', () => {
+    const pick = document.querySelector('.simPicker[data-ctx="sms"]'); const card = pick && pick.closest('.card'); if(!card) return;
+    const j = document.createElement('div'); j.className = 'card';
+    j.innerHTML = `<h2>📜 Journal des envois</h2>
+      <p class="dim">Ce journal est tenu par l'application : il montre ce que le téléphone a répondu pour chaque SMS, même si l'appli SMS ne les affiche pas.</p>
+      <div class="row" style="gap:8px;margin-bottom:8px;"><button type="button" class="btn btn-primary btn-small" id="journalRefresh">🔄 Actualiser</button><button type="button" class="btn btn-secondary btn-small" id="journalClear">🗑️ Vider</button></div>
+      <div id="journalBox"></div>`;
+    card.after(j);
+    document.getElementById('journalRefresh').addEventListener('click', renderJournal);
+    document.getElementById('journalClear').addEventListener('click', () => { try{ ShamanNative.clearJournal(); }catch(e){} renderJournal(); });
+    renderJournal();
+    setInterval(() => { if(document.visibilityState === 'visible') renderJournal(); }, 15000);
+  });
 }
 function cleanNum(n){ return String(n).replace(/\s+/g, ''); }
 // Branche un bouton « envoi automatique » : progression + fin.
