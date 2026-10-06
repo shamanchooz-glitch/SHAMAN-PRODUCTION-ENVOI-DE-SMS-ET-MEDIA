@@ -1543,7 +1543,7 @@ smsBody.addEventListener('input', () => {
    Dans l'APK, window.ShamanNative existe : les SMS partent directement,
    sans ouvrir l'appli SMS, avec choix automatique de la SIM. */
 const NATIVE = !!window.ShamanNative;
-const APP_VERSION = '1.7';
+const APP_VERSION = '1.8';
 const nativeCbs = {};
 window.onShamanSms = function(json){
   try{ const e = JSON.parse(json); const cb = nativeCbs[e.id]; if(cb) cb(e); if(e.type === 'done') delete nativeCbs[e.id]; }catch(err){}
@@ -1596,36 +1596,63 @@ function journalLabel(code){
   if(c === 5) return ['⛔', "Limite d'envoi d'Android atteinte"];
   return ['❌', 'Erreur ' + c];
 }
+let journalOnlyFail = false, journalText = '';
 function renderJournal(){
   const box = document.getElementById('journalBox'); if(!box) return;
-  let arr = []; try{ arr = JSON.parse(ShamanNative.getJournal(200)); }catch(e){}
-  if(!arr.length){ box.innerHTML = '<div class="empty">Aucun envoi enregistré pour le moment.</div>'; return; }
-  const rows = arr.slice().reverse().map(l => l.split('|'));
+  let arr = []; try{ arr = JSON.parse(ShamanNative.getJournal(300)); }catch(e){}
+  if(!arr.length){ box.innerHTML = '<div class="empty">Aucun envoi enregistré pour le moment.</div>'; journalText = ''; return; }
+  const all = arr.slice().reverse().map(l => l.split('|'));
   const hourAgo = Date.now() - 3600000;
-  let ok = 0, ko = 0;
-  rows.forEach(r => { if(+r[0] >= hourAgo){ if(parseInt(r[3]) === 0) ok++; else ko++; } });
-  box.innerHTML = `<div style="font-weight:700;margin-bottom:8px;">Dernière heure : ${ok} envoyé(s), ${ko} échec(s)</div>` +
-    rows.slice(0, 60).map(r => {
-      const [ic, txt] = journalLabel(r[3]);
-      const t = new Date(+r[0]).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      return `<div style="font-size:12.5px;padding:5px 0;border-bottom:1px solid var(--line, #cde);">${ic} <b>${escapeHtml(t)}</b> · ${escapeHtml(r[1])} · ${escapeHtml(r[2])}<br><span style="color:var(--text-dim);">${escapeHtml(txt)}</span></div>`;
-    }).join('');
-}
-if(NATIVE){
-  document.addEventListener('DOMContentLoaded', () => {
-    const pick = document.querySelector('.simPicker[data-ctx="sms"]'); const card = pick && pick.closest('.card'); if(!card) return;
-    const j = document.createElement('div'); j.className = 'card';
-    j.innerHTML = `<h2>📜 Journal des envois</h2>
-      <p class="dim">Ce journal est tenu par l'application : il montre ce que le téléphone a répondu pour chaque SMS, même si l'appli SMS ne les affiche pas.</p>
-      <div class="row" style="gap:8px;margin-bottom:8px;"><button type="button" class="btn btn-primary btn-small" id="journalRefresh">🔄 Actualiser</button><button type="button" class="btn btn-secondary btn-small" id="journalClear">🗑️ Vider</button></div>
-      <div id="journalBox"></div>`;
-    card.after(j);
-    document.getElementById('journalRefresh').addEventListener('click', renderJournal);
-    document.getElementById('journalClear').addEventListener('click', () => { try{ ShamanNative.clearJournal(); }catch(e){} renderJournal(); });
-    renderJournal();
-    setInterval(() => { if(document.visibilityState === 'visible') renderJournal(); }, 15000);
+  let ok = 0, ko = 0; const bySim = {};
+  all.forEach(r => {
+    if(+r[0] < hourAgo) return;
+    const good = parseInt(r[3]) === 0; if(good) ok++; else ko++;
+    const o = bySim[r[2]] || (bySim[r[2]] = { ok: 0, ko: 0 }); if(good) o.ok++; else o.ko++;
   });
+  const simLine = Object.keys(bySim).sort().map(k => `${k} : ${bySim[k].ok} envoyé(s), ${bySim[k].ko} échec(s)`).join(' · ');
+  const rows = (journalOnlyFail ? all.filter(r => parseInt(r[3]) !== 0) : all).slice(0, 80);
+  const fmt = r => new Date(+r[0]).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  journalText = rows.map(r => `${fmt(r)} ${r[1]} ${r[2]} ${journalLabel(r[3])[1]}`).join('\n');
+  box.innerHTML = `<div style="font-weight:700;">Dernière heure : ${ok} envoyé(s), ${ko} échec(s)</div>` +
+    `<div style="font-size:12.5px;margin:2px 0 10px;">${escapeHtml(simLine)}</div>` +
+    (rows.length ? rows.map(r => {
+      const [ic, txt] = journalLabel(r[3]);
+      return `<div style="font-size:12.5px;padding:5px 0;border-bottom:1px solid #cfe3f0;">${ic} <b>${escapeHtml(fmt(r))}</b> · ${escapeHtml(r[1])} · ${escapeHtml(r[2])}<br><span style="color:#5b7184;">${escapeHtml(txt)}</span></div>`;
+    }).join('') : '<div class="empty">Aucun échec.</div>');
 }
+function journalOpen(open){
+  const m = document.getElementById('journalModal'), f = document.getElementById('journalFab'); if(!m) return;
+  m.style.display = open ? 'block' : 'none'; f.style.display = open ? 'none' : 'block';
+  if(open) renderJournal();
+}
+function initJournalUi(){
+  if(!NATIVE || document.getElementById('journalFab')) return;
+  const fab = document.createElement('button');
+  fab.id = 'journalFab'; fab.type = 'button'; fab.textContent = '📜 Journal des envois';
+  fab.style.cssText = 'position:fixed;right:10px;bottom:calc(12px + env(safe-area-inset-bottom,0px));z-index:900;border:0;border-radius:22px;padding:10px 14px;font-size:13px;font-weight:700;color:#fff;background:linear-gradient(135deg,#f0508a,#ff8fbd);box-shadow:0 4px 14px rgba(0,0,0,.25);';
+  const m = document.createElement('div');
+  m.id = 'journalModal';
+  m.style.cssText = 'display:none;position:fixed;inset:0;z-index:1000;background:#EAF5FC;overflow:auto;padding:14px;padding-top:calc(14px + env(safe-area-inset-top,0px));padding-bottom:calc(24px + env(safe-area-inset-bottom,0px));';
+  m.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+      <h2 style="margin:0;">📜 Journal des envois</h2>
+      <button type="button" class="btn btn-secondary btn-small" id="journalClose" style="width:auto;">✕ Fermer</button></div>
+    <p class="dim">Ce que le téléphone a répondu pour chaque SMS, même si l'appli SMS ne les affiche pas.</p>
+    <div class="row" style="gap:8px;margin-bottom:8px;flex-wrap:wrap;">
+      <button type="button" class="btn btn-primary btn-small" id="journalRefresh" style="flex:1 1 0;min-width:0;">🔄 Actualiser</button>
+      <button type="button" class="btn btn-secondary btn-small" id="journalCopy" style="flex:1 1 0;min-width:0;">📋 Copier</button>
+      <button type="button" class="btn btn-secondary btn-small" id="journalClear" style="flex:1 1 0;min-width:0;">🗑️ Vider</button></div>
+    <label class="check-row"><input type="checkbox" id="journalFail"> Afficher seulement les échecs</label>
+    <div id="journalBox" style="margin-top:8px;"></div>`;
+  document.body.appendChild(m); document.body.appendChild(fab);
+  fab.addEventListener('click', () => journalOpen(true));
+  document.getElementById('journalClose').addEventListener('click', () => journalOpen(false));
+  document.getElementById('journalRefresh').addEventListener('click', renderJournal);
+  document.getElementById('journalCopy').addEventListener('click', e => { if(journalText) copyToClipboard(journalText, e.target); });
+  document.getElementById('journalClear').addEventListener('click', () => { try{ ShamanNative.clearJournal(); }catch(err){} renderJournal(); });
+  document.getElementById('journalFail').addEventListener('change', e => { journalOnlyFail = e.target.checked; renderJournal(); });
+  setInterval(() => { if(m.style.display === 'block') renderJournal(); }, 5000);
+}
+if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initJournalUi); else initJournalUi();
 function cleanNum(n){ return String(n).replace(/\s+/g, ''); }
 // Branche un bouton « envoi automatique » : progression + fin.
 function nativeRun(btn, statusEl, numbers, body, onDone){
