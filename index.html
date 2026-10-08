@@ -1543,7 +1543,7 @@ smsBody.addEventListener('input', () => {
    Dans l'APK, window.ShamanNative existe : les SMS partent directement,
    sans ouvrir l'appli SMS, avec choix automatique de la SIM. */
 const NATIVE = !!window.ShamanNative;
-const APP_VERSION = '1.8';
+const APP_VERSION = '1.9';
 const nativeCbs = {};
 window.onShamanSms = function(json){
   try{ const e = JSON.parse(json); const cb = nativeCbs[e.id]; if(cb) cb(e); if(e.type === 'done') delete nativeCbs[e.id]; }catch(err){}
@@ -1594,6 +1594,8 @@ function journalLabel(code){
   if(c === 2) return ['❌', 'Radio éteinte (mode avion ?)'];
   if(c === 4) return ['❌', 'Pas de réseau'];
   if(c === 5) return ['⛔', "Limite d'envoi d'Android atteinte"];
+  if(c === 100) return ['▶️', 'Envoi démarré'];
+  if(c === 101) return ['⚠️', 'Erreur interne du téléphone']; 
   return ['❌', 'Erreur ' + c];
 }
 let journalOnlyFail = false, journalText = '';
@@ -1605,7 +1607,7 @@ function renderJournal(){
   const hourAgo = Date.now() - 3600000;
   let ok = 0, ko = 0; const bySim = {};
   all.forEach(r => {
-    if(+r[0] < hourAgo) return;
+    if(+r[0] < hourAgo || parseInt(r[3]) >= 100) return;
     const good = parseInt(r[3]) === 0; if(good) ok++; else ko++;
     const o = bySim[r[2]] || (bySim[r[2]] = { ok: 0, ko: 0 }); if(good) o.ok++; else o.ko++;
   });
@@ -1620,13 +1622,22 @@ function renderJournal(){
       return `<div style="font-size:12.5px;padding:5px 0;border-bottom:1px solid #cfe3f0;">${ic} <b>${escapeHtml(fmt(r))}</b> · ${escapeHtml(r[1])} · ${escapeHtml(r[2])}<br><span style="color:#5b7184;">${escapeHtml(txt)}</span></div>`;
     }).join('') : '<div class="empty">Aucun échec.</div>');
 }
+function renderJournalState(){
+  const e = document.getElementById('journalState'); if(!e) return;
+  let st = null; try{ st = JSON.parse(ShamanNative.status()); }catch(err){}
+  if(!st){ e.textContent = ''; return; }
+  const ago = st.at ? Math.round((Date.now() - st.at) / 1000) : null;
+  e.textContent = (st.running ? '⏳ Envoi en cours' : '⏸ Aucun envoi en cours') + (st.keep ? ' · mode arrière-plan actif' : '')
+    + (st.last ? ' — ' + st.last + (ago !== null ? ` (il y a ${ago < 90 ? ago + ' s' : Math.round(ago / 60) + ' min'})` : '') : '');
+}
 function journalOpen(open){
   const m = document.getElementById('journalModal'), f = document.getElementById('journalFab'); if(!m) return;
   m.style.display = open ? 'block' : 'none'; f.style.display = open ? 'none' : 'block';
-  if(open) renderJournal();
+  if(open){ renderJournal(); renderJournalState(); }
 }
 function initJournalUi(){
   if(!NATIVE || document.getElementById('journalFab')) return;
+  document.querySelectorAll('p.dim').forEach(p => { if(p.textContent.indexOf("Le robot ouvre l'appli SMS") === 0) p.textContent = "Le robot envoie tous les lots tout seul (SIM 1 / SIM 2). Suivez l'avancement avec le bouton « Journal des envois »."; });
   const fab = document.createElement('button');
   fab.id = 'journalFab'; fab.type = 'button'; fab.textContent = '📜 Journal des envois';
   fab.style.cssText = 'position:fixed;right:10px;bottom:calc(12px + env(safe-area-inset-bottom,0px));z-index:900;border:0;border-radius:22px;padding:10px 14px;font-size:13px;font-weight:700;color:#fff;background:linear-gradient(135deg,#f0508a,#ff8fbd);box-shadow:0 4px 14px rgba(0,0,0,.25);';
@@ -1642,15 +1653,16 @@ function initJournalUi(){
       <button type="button" class="btn btn-secondary btn-small" id="journalCopy" style="flex:1 1 0;min-width:0;">📋 Copier</button>
       <button type="button" class="btn btn-secondary btn-small" id="journalClear" style="flex:1 1 0;min-width:0;">🗑️ Vider</button></div>
     <label class="check-row"><input type="checkbox" id="journalFail"> Afficher seulement les échecs</label>
+    <div id="journalState" style="font-size:13px;font-weight:700;margin:6px 0;"></div>
     <div id="journalBox" style="margin-top:8px;"></div>`;
   document.body.appendChild(m); document.body.appendChild(fab);
   fab.addEventListener('click', () => journalOpen(true));
   document.getElementById('journalClose').addEventListener('click', () => journalOpen(false));
-  document.getElementById('journalRefresh').addEventListener('click', renderJournal);
+  document.getElementById('journalRefresh').addEventListener('click', () => { renderJournal(); renderJournalState(); });
   document.getElementById('journalCopy').addEventListener('click', e => { if(journalText) copyToClipboard(journalText, e.target); });
   document.getElementById('journalClear').addEventListener('click', () => { try{ ShamanNative.clearJournal(); }catch(err){} renderJournal(); });
   document.getElementById('journalFail').addEventListener('change', e => { journalOnlyFail = e.target.checked; renderJournal(); });
-  setInterval(() => { if(m.style.display === 'block') renderJournal(); }, 5000);
+  setInterval(() => { if(m.style.display === 'block'){ renderJournal(); renderJournalState(); } }, 3000);
 }
 if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initJournalUi); else initJournalUi();
 function cleanNum(n){ return String(n).replace(/\s+/g, ''); }
@@ -2882,6 +2894,7 @@ function rbEnd(d, ev){
 }
 function rbOnEvent(d){
   return ev => {
+    d.seen = true;
     if(ev.type === 'progress'){
       rbDescAdvance(d, ev.sent + ev.failed);
       rbSetLive(`⏳ Robot : ${ev.sent + ev.failed} / ${ev.total} SMS · lot ${Math.min(d.marked + 1, d.lots.length)} / ${d.lots.length} · ${ev.sim || ''}${ev.note ? ' · ' + ev.note : ''}`);
@@ -2930,7 +2943,16 @@ function rbDrain(it, manual){
   rbSetLive(`⏳ Robot : démarrage — ${nums.length} SMS en ${lots.length} lot(s)…`);
   const stopAt = manual ? 0 : rbQuietStopAt();
   const res = ShamanNative.sendSms(JSON.stringify({ id: nid, numbers: nums, body: '', bodies, mode: simGet().mode, delay: simGet().delay, stopAt }));
-  if(res !== 'ok') rbOnEvent(d)({ type: 'error', message: res });
+  if(res !== 'ok'){ rbOnEvent(d)({ type: 'error', message: res }); return; }
+  // Garde-fou : si le téléphone ne répond pas dans les 25 s, on le dit au lieu de rester bloqué sur « démarrage ».
+  setTimeout(() => {
+    if(rbAwait !== j.id || !nativeCbs[nid] || d.seen) return;
+    let st = null; try{ st = JSON.parse(ShamanNative.jobState(nid)); }catch(e){}
+    let ns = null; try{ ns = JSON.parse(ShamanNative.status()); }catch(e){}
+    if(!st || !st.known){
+      rbEnd(d, { type: 'error', message: "L'envoi n'a pas démarré sur le téléphone" + (ns && ns.last ? ' (' + ns.last + ')' : '') + '. Ouvrez le journal pour voir la cause, puis réessayez.' });
+    }
+  }, 25000);
 }
 // Après une pause de la page ou un rechargement : rattrape ce que le téléphone a envoyé entre-temps.
 function rbRecover(){
