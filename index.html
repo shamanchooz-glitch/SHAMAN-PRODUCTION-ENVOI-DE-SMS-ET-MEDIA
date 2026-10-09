@@ -1543,17 +1543,49 @@ smsBody.addEventListener('input', () => {
    Dans l'APK, window.ShamanNative existe : les SMS partent directement,
    sans ouvrir l'appli SMS, avec choix automatique de la SIM. */
 const NATIVE = !!window.ShamanNative;
-const APP_VERSION = '1.9';
+const APP_VERSION = '1.10';
 const nativeCbs = {};
 window.onShamanSms = function(json){
   try{ const e = JSON.parse(json); const cb = nativeCbs[e.id]; if(cb) cb(e); if(e.type === 'done') delete nativeCbs[e.id]; }catch(err){}
 };
 function nativeSims(){ try{ return JSON.parse(ShamanNative.getSims()); }catch(e){ return []; } }
+const GSM7 = "@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà";
+const GSM7EXT = "^{}\\[~]|€";
+// Combien de SMS facturés par destinataire ? (GSM-7 : 160 / 153 caractères, Unicode : 70 / 67)
+function smsParts(t){
+  let units = 0, ucs = false;
+  for(const ch of t){ if(GSM7.includes(ch)) units += 1; else if(GSM7EXT.includes(ch)) units += 2; else { ucs = true; break; } }
+  if(ucs){ const n = t.length; return { enc: 'Unicode', len: n, parts: n <= 70 ? 1 : Math.ceil(n / 67) }; }
+  return { enc: 'GSM-7', len: units, parts: units <= 160 ? 1 : Math.ceil(units / 153) };
+}
+function smsSimplify(t){
+  const map = { '’':"'", '‘':"'", '“':'"', '”':'"', '«':'"', '»':'"', '…':'...', '–':'-', '—':'-', '\u00a0':' ', '\u202f':' ', '•':'-', '→':'->', '°':'o', 'œ':'oe', 'Œ':'OE',
+    'â':'a','ê':'e','î':'i','ô':'o','û':'u','ë':'e','ï':'i','ÿ':'y','ç':'c','À':'A','Â':'A','È':'E','Ê':'E','Ë':'E','Î':'I','Ï':'I','Ô':'O','Ù':'U','Û':'U' };
+  let out = '';
+  for(const ch of t){
+    if(map[ch] !== undefined) out += map[ch];
+    else if(GSM7.includes(ch) || GSM7EXT.includes(ch)) out += ch;
+    else if(/\p{Extended_Pictographic}|\uFE0F|\u200d/u.test(ch)) out += '';
+    else { const d = ch.normalize('NFD').replace(/[\u0300-\u036f]/g, ''); out += GSM7.includes(d) ? d : ''; }
+  }
+  return out.replace(/ {2,}/g, ' ').trim();
+}
+function smsPartsText(t){
+  if(!t) return '';
+  const a = smsParts(t), b = smsParts(smsSimplify(t));
+  let r = `Message : ${a.len} caractères (${a.enc}) → ${a.parts} SMS facturé(s) par destinataire`;
+  if(b.parts < a.parts) r += ` · version simplifiée : ${b.parts} SMS`;
+  return r;
+}
 function nativeSend(numbers, body, onEvent, bodies, extra){
   const id = (extra && extra.id) || ('n' + Date.now() + Math.random().toString(36).slice(2, 6));
   nativeCbs[id] = onEvent;
   const S = simGet();
-  const r = ShamanNative.sendSms(JSON.stringify({ id, numbers, body, bodies, mode: S.mode, delay: S.delay, stopAt: (extra && extra.stopAt) || 0 }));
+  const cache = {};
+  const sb = t => S.simplify ? (cache[t] !== undefined ? cache[t] : (cache[t] = smsSimplify(t))) : t;
+  const body2 = sb(body || ''), bodies2 = bodies ? bodies.map(sb) : bodies;
+  try{ localStorage.setItem('shaman_last_body', (bodies2 && bodies2[0]) || body2 || ''); }catch(e){}
+  const r = ShamanNative.sendSms(JSON.stringify({ id, numbers, body: body2, bodies: bodies2, mode: S.mode, delay: S.delay, stopAt: (extra && extra.stopAt) || 0 }));
   if(r !== 'ok'){ delete nativeCbs[id]; onEvent({ id, type: 'error', message: r }); }
   return id;
 }
@@ -1580,7 +1612,7 @@ function nativeSendLots(lots, onProgress, onFinish){
   advance(0);
   if(!flat.length){ onFinish({ type: 'done', sent: 0, failed: 0, total: 0 }); return; }
   nativeSend(flat, '', ev => {
-    if(ev.type === 'progress'){ advance(ev.sent + ev.failed); onProgress(ev, Math.min(next + 1, lots.length), lots.length); }
+    if(ev.type === 'progress'){ advance(ev.prefix !== undefined ? ev.prefix : ev.sent + ev.failed); onProgress(ev, Math.min(next + 1, lots.length), lots.length); }
     else if(ev.type === 'error'){ onProgress(ev, next + 1, lots.length); if(ev.fatal) onFinish(ev); }
     else if(ev.type === 'done'){ if(!ev.aborted && !ev.cancelled && !ev.paused) advance(Infinity); onFinish(ev); }
   }, bodies);
@@ -1599,28 +1631,61 @@ function journalLabel(code){
   return ['❌', 'Erreur ' + c];
 }
 let journalOnlyFail = false, journalText = '';
+function journalAnalysis(lines){
+  const per = {};
+  lines.forEach(l => {
+    const r = l.split('|'); const code = parseInt(r[3]); if(isNaN(code) || code >= 100) return;
+    const o = per[r[1]] || (per[r[1]] = { ok: false, bad: new Set() });
+    if(code === 0) o.ok = true; else o.bad.add(r[2]);
+  });
+  const both = [], one = [];
+  Object.keys(per).forEach(n => { const o = per[n]; if(o.ok) return; (o.bad.size >= 2 ? both : one).push(n); });
+  return { both, one };
+}
 function renderJournal(){
   const box = document.getElementById('journalBox'); if(!box) return;
-  let arr = []; try{ arr = JSON.parse(ShamanNative.getJournal(300)); }catch(e){}
-  if(!arr.length){ box.innerHTML = '<div class="empty">Aucun envoi enregistré pour le moment.</div>'; journalText = ''; return; }
-  const all = arr.slice().reverse().map(l => l.split('|'));
+  let lines = []; try{ lines = JSON.parse(ShamanNative.getJournal(5000)); }catch(e){}
+  const retry = document.getElementById('journalRetryBox');
+  if(!lines.length){ box.innerHTML = '<div class="empty">Aucun envoi enregistré pour le moment.</div>'; journalText = ''; if(retry) retry.innerHTML = ''; return; }
+  const all = lines.slice(-300).reverse().map(l => l.split('|'));
   const hourAgo = Date.now() - 3600000;
-  let ok = 0, ko = 0; const bySim = {};
+  let ok = 0, ko = 0, partsSum = 0, partsN = 0; const bySim = {};
   all.forEach(r => {
     if(+r[0] < hourAgo || parseInt(r[3]) >= 100) return;
     const good = parseInt(r[3]) === 0; if(good) ok++; else ko++;
     const o = bySim[r[2]] || (bySim[r[2]] = { ok: 0, ko: 0 }); if(good) o.ok++; else o.ko++;
+    if(r[4]){ partsSum += parseInt(r[4]) || 1; partsN++; }
   });
   const simLine = Object.keys(bySim).sort().map(k => `${k} : ${bySim[k].ok} envoyé(s), ${bySim[k].ko} échec(s)`).join(' · ');
-  const rows = (journalOnlyFail ? all.filter(r => parseInt(r[3]) !== 0) : all).slice(0, 80);
+  const an = journalAnalysis(lines);
+  const avgParts = partsN ? Math.round(partsSum / partsN * 10) / 10 : 1;
+  const rows = (journalOnlyFail ? all.filter(r => parseInt(r[3]) !== 0 && parseInt(r[3]) < 100) : all).slice(0, 80);
   const fmt = r => new Date(+r[0]).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   journalText = rows.map(r => `${fmt(r)} ${r[1]} ${r[2]} ${journalLabel(r[3])[1]}`).join('\n');
   box.innerHTML = `<div style="font-weight:700;">Dernière heure : ${ok} envoyé(s), ${ko} échec(s)</div>` +
-    `<div style="font-size:12.5px;margin:2px 0 10px;">${escapeHtml(simLine)}</div>` +
+    `<div style="font-size:12.5px;margin:2px 0 6px;">${escapeHtml(simLine)}</div>` +
+    (avgParts > 1 ? `<div style="font-size:12.5px;margin:0 0 6px;">📨 Vos messages comptent en moyenne <b>${avgParts} SMS</b> par destinataire (crédit consommé ×${avgParts}).</div>` : '') +
+    `<div style="font-size:12.5px;margin:0 0 10px;">Numéros en échec : <b>${an.one.length + an.both.length}</b> — dont <b>${an.both.length}</b> ont échoué sur les 2 SIM (numéro probablement inactif ou bloqué).</div>` +
     (rows.length ? rows.map(r => {
       const [ic, txt] = journalLabel(r[3]);
-      return `<div style="font-size:12.5px;padding:5px 0;border-bottom:1px solid #cfe3f0;">${ic} <b>${escapeHtml(fmt(r))}</b> · ${escapeHtml(r[1])} · ${escapeHtml(r[2])}<br><span style="color:#5b7184;">${escapeHtml(txt)}</span></div>`;
+      const pp = r[4] && parseInt(r[4]) > 1 ? ` · ${parseInt(r[4])} SMS` : '';
+      return `<div style="font-size:12.5px;padding:5px 0;border-bottom:1px solid #cfe3f0;">${ic} <b>${escapeHtml(fmt(r))}</b> · ${escapeHtml(r[1])} · ${escapeHtml(r[2])}${pp}<br><span style="color:#5b7184;">${escapeHtml(txt)}</span></div>`;
     }).join('') : '<div class="empty">Aucun échec.</div>');
+  if(retry) retry.innerHTML = (an.one.length || an.both.length) ?
+    `<div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:6px;">` +
+    (an.one.length ? `<button type="button" class="btn btn-primary btn-small" data-journal-retry="soft" style="flex:1 1 100%;">🔁 Réessayer les échecs récupérables (${an.one.length})</button>` : '') +
+    `<button type="button" class="btn btn-secondary btn-small" data-journal-retry="all" style="flex:1 1 100%;">Réessayer tous les échecs (${an.one.length + an.both.length})</button></div>` : '';
+}
+function journalRetry(kind){
+  let lines = []; try{ lines = JSON.parse(ShamanNative.getJournal(5000)); }catch(e){}
+  const an = journalAnalysis(lines);
+  const nums = kind === 'all' ? an.one.concat(an.both) : an.one;
+  if(!nums.length){ alert('Aucun échec à réessayer.'); return; }
+  let body = ''; try{ body = localStorage.getItem('shaman_last_body') || ''; }catch(e){}
+  if(!body){ alert("Message introuvable : lancez d'abord un envoi, puis réessayez."); return; }
+  if(!confirm(`Réessayer ${nums.length} numéro(s) avec le dernier message envoyé ?\n\n« ${body.slice(0, 90)}${body.length > 90 ? '…' : ''} »\n${smsPartsText(body)}`)) return;
+  nativeSend(nums, body, ev => { if(ev.type === 'error') alert(ev.message); });
+  setTimeout(renderJournalState, 800);
 }
 function renderJournalState(){
   const e = document.getElementById('journalState'); if(!e) return;
@@ -1654,9 +1719,11 @@ function initJournalUi(){
       <button type="button" class="btn btn-secondary btn-small" id="journalClear" style="flex:1 1 0;min-width:0;">🗑️ Vider</button></div>
     <label class="check-row"><input type="checkbox" id="journalFail"> Afficher seulement les échecs</label>
     <div id="journalState" style="font-size:13px;font-weight:700;margin:6px 0;"></div>
+    <div id="journalRetryBox"></div>
     <div id="journalBox" style="margin-top:8px;"></div>`;
   document.body.appendChild(m); document.body.appendChild(fab);
   fab.addEventListener('click', () => journalOpen(true));
+  m.addEventListener('click', e => { const bt = e.target.closest('[data-journal-retry]'); if(bt) journalRetry(bt.dataset.journalRetry); });
   document.getElementById('journalClose').addEventListener('click', () => journalOpen(false));
   document.getElementById('journalRefresh').addEventListener('click', () => { renderJournal(); renderJournalState(); });
   document.getElementById('journalCopy').addEventListener('click', e => { if(journalText) copyToClipboard(journalText, e.target); });
@@ -1728,7 +1795,7 @@ function smsAutoAll(){
     const m = b.closest('.batch').querySelector('[data-mark]'); if(m) m.click();
   }}));
   const totalSms = lots.reduce((a, l) => a + l.nums.length, 0);
-  if(!confirm(`Envoyer automatiquement ${totalSms} SMS en ${lots.length} lot(s), jusqu'au dernier, avec alternance des SIM ?`)) return;
+  if(!confirm(`Envoyer automatiquement ${totalSms} SMS en ${lots.length} lot(s), jusqu'au dernier, avec alternance des SIM ?\n\n${smsPartsText(lots[0].body)}`)) return;
   simAllStart();
   btns.forEach(b => { b.disabled = true; });
   nativeSendLots(lots, (ev, k, n) => {
@@ -1762,7 +1829,7 @@ function baseAutoAll(){
       simAdvance(1); saveDB(); updateBaseMeta(b.id); updateBaseSendInfo(); renderCurrentBaseBatch();
     }});
   }
-  if(!confirm(`Envoyer automatiquement à ${left} numéro(s), en ${lots.length} lot(s), jusqu'à la fin de la base, avec alternance des SIM ?`)) return;
+  if(!confirm(`Envoyer automatiquement à ${left} numéro(s), en ${lots.length} lot(s), jusqu'à la fin de la base, avec alternance des SIM ?\n\n${smsPartsText(bodyAll)}`)) return;
   simAllStart();
   nativeSendLots(lots, (ev, k, n) => {
     if(ev.type === 'progress') setSimAllMsg(`⏳ Lot ${k} / ${n} · ${ev.sent + ev.failed} / ${ev.total} SMS · ${ev.sim || ''}${ev.note ? ' · ' + ev.note : ''}`);
@@ -1784,6 +1851,8 @@ function renderSimPickers(){
       ${NATIVE ? `<div style="font-size:12.5px;margin-top:8px;">${nativeSims().map(x => '📶 SIM ' + (x.slot + 1) + ' : ' + escapeHtml(x.name || '') + (x.number ? ' · ' + escapeHtml(x.number) : '')).join('<br>') || '⚠️ Aucune SIM détectée (autorisez « Téléphone » pour l\'app).'}</div>
       <div style="font-size:12px;color:var(--text-dim);margin-top:6px;">📦 Version de l'application : ${APP_VERSION}</div>
       <label class="check-row" style="margin-top:10px;"><input type="checkbox" data-sim-keep ${S.keep !== false ? 'checked' : ''}> 🔋 Garder l'app active en arrière-plan (les envois continuent écran éteint, pendant un appel ou dans une autre appli)</label>
+      <label class="check-row" style="margin-top:10px;"><input type="checkbox" data-sim-simplify ${S.simplify ? 'checked' : ''}> ✂️ Simplifier les messages (retire ê î ô â û ç, emojis et guillemets spéciaux) : moins de SMS facturés par personne</label>
+      <div style="font-size:12px;color:var(--text-dim);">${escapeHtml((() => { try{ return smsPartsText(localStorage.getItem('shaman_last_body') || ''); }catch(e){ return ''; } })())}</div>
       <button type="button" class="btn btn-secondary btn-small" data-sim-battery style="margin-top:6px;">${(()=>{ try{ return ShamanNative.isBatteryExempt() ? '✅ Batterie : sans restriction' : '⚙️ Autoriser sans restriction de batterie'; }catch(e){ return '⚙️ Batterie'; } })()}</button>
       <label>Pause entre deux SMS (secondes)</label><input type="number" min="0" max="60" data-sim-delay value="${S.delay}"><div class="row" style="gap:8px;margin-top:12px;flex-wrap:nowrap;align-items:stretch;"><button type="button" class="btn btn-secondary btn-small" data-sim-stop style="flex:1 1 0;min-width:0;width:auto;margin:0;padding:10px 6px;font-size:12.5px;line-height:1.25;">⛔ Arrêter tous les envois en cours</button>${(el.dataset.ctx === 'sms' || el.dataset.ctx === 'base') ? `<button type="button" class="btn btn-primary btn-small" data-sim-all style="flex:1 1 0;min-width:0;width:auto;margin:0;padding:10px 6px;font-size:12.5px;line-height:1.25;" ${simAllRunning ? 'disabled' : ''}>⚡ Tout envoyer automatiquement</button>` : ''}</div><div class="sim-all-status" style="font-size:13px;font-weight:700;margin-top:8px;">${escapeHtml(simAllMsg)}</div>` : ''}
       ${next && !NATIVE ? `<div style="font-size:12.5px;color:#C43E71;font-weight:700;margin-top:8px;">${escapeHtml(next)}</div><button type="button" class="btn btn-secondary btn-small" data-sim-reset style="margin-top:6px;">↺ Recommencer par la SIM 1</button>` : ''}`;
@@ -1802,6 +1871,7 @@ function renderSimPickers(){
     const stp = el.querySelector('[data-sim-stop]'); if(stp) stp.addEventListener('click', () => { simAllStop = true; setSimAllMsg('⛔ Arrêt demandé…'); try{ ShamanNative.cancel(); }catch(e){} setTimeout(() => { if(simAllRunning) simAllFinish('⛔ Envoi arrêté.'); }, 4000); });
     const all = el.querySelector('[data-sim-all]'); if(all) all.addEventListener('click', () => { if(el.dataset.ctx === 'base') baseAutoAll(); else smsAutoAll(); });
     const kp = el.querySelector('[data-sim-keep]'); if(kp) kp.addEventListener('change', () => { simSet({ keep: kp.checked }); try{ ShamanNative.setKeepAlive(kp.checked); }catch(e){} renderSimPickers(); });
+    const sp = el.querySelector('[data-sim-simplify]'); if(sp) sp.addEventListener('change', () => { simSet({ simplify: sp.checked }); renderSimPickers(); });
     const bt = el.querySelector('[data-sim-battery]'); if(bt) bt.addEventListener('click', () => { try{ ShamanNative.requestBatteryExemption(); }catch(e){} setTimeout(renderSimPickers, 1500); });
     const dl = el.querySelector('[data-sim-delay]');
     if(dl) dl.addEventListener('input', () => simSet({ delay: Math.max(0, parseInt(dl.value) || 0) }));
@@ -2896,7 +2966,7 @@ function rbOnEvent(d){
   return ev => {
     d.seen = true;
     if(ev.type === 'progress'){
-      rbDescAdvance(d, ev.sent + ev.failed);
+      rbDescAdvance(d, ev.prefix !== undefined ? ev.prefix : ev.sent + ev.failed);
       rbSetLive(`⏳ Robot : ${ev.sent + ev.failed} / ${ev.total} SMS · lot ${Math.min(d.marked + 1, d.lots.length)} / ${d.lots.length} · ${ev.sim || ''}${ev.note ? ' · ' + ev.note : ''}`);
     } else if(ev.type === 'error'){ rbEnd(d, ev); }
     else if(ev.type === 'done'){
@@ -2928,7 +2998,8 @@ function rbDrain(it, manual){
     lots = keep; if(!lots.length){ rbSetLive('⏸ Plafond du jour atteint.'); return; }
   }
   const nums = [], bodies = [];
-  const msg = it.msg;
+  const msg = simGet().simplify ? smsSimplify(it.msg) : it.msg;
+  try{ localStorage.setItem('shaman_last_body', msg); }catch(e){}
   lots.forEach(L => {
     const arr = src.slice(L.start, L.start + L.n).map(cleanNum).filter(n => n && !isBlocked(n));
     L.m = arr.length; arr.forEach(n => { nums.push(n); bodies.push(msg); });
@@ -2940,7 +3011,7 @@ function rbDrain(it, manual){
   nativeCbs[nid] = rbOnEvent(d);
   rbDescAdvance(d, 0);
   if(!nums.length){ rbEnd(d, { type: 'done', sent: 0, failed: 0, total: 0 }); return; }
-  rbSetLive(`⏳ Robot : démarrage — ${nums.length} SMS en ${lots.length} lot(s)…`);
+  rbSetLive(`⏳ Robot : démarrage — ${nums.length} destinataires en ${lots.length} lot(s) · ${smsParts(msg).parts} SMS facturé(s) chacun…`);
   const stopAt = manual ? 0 : rbQuietStopAt();
   const res = ShamanNative.sendSms(JSON.stringify({ id: nid, numbers: nums, body: '', bodies, mode: simGet().mode, delay: simGet().delay, stopAt }));
   if(res !== 'ok'){ rbOnEvent(d)({ type: 'error', message: res }); return; }
@@ -2962,7 +3033,7 @@ function rbRecover(){
   let st; try{ st = JSON.parse(ShamanNative.jobState(d.nid)); }catch(e){ st = { known: false }; }
   if(!st.known){ try{ localStorage.removeItem(RB_DESC_KEY); }catch(e){} rbAwait = null; return; }
   rbAwait = d.jobId; rbAwaitAt = Date.now();
-  rbDescAdvance(d, st.sent + st.failed);
+  rbDescAdvance(d, st.prefix !== undefined ? st.prefix : st.sent + st.failed);
   if(st.done || !st.running) rbEnd(d, Object.assign({ type: 'done', total: st.total }, st, { aborted: st.aborted || (!st.done && !st.running), reason: st.aborted ? 'Envoi interrompu.' : 'Envoi interrompu (application fermée ?).' }));
   else nativeCbs[d.nid] = rbOnEvent(d);
 }
