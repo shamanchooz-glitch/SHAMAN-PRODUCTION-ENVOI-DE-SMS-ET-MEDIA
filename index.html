@@ -802,6 +802,7 @@ function loadDB(){
 function saveDB(){
   localStorage.setItem(DB_KEY, JSON.stringify(db));
   scheduleSyncPush();
+  if(typeof pushSkipToNative === 'function') pushSkipToNative(false);
 }
 let db = loadDB();
 if(!db.scheduled) db.scheduled = [];
@@ -1543,7 +1544,7 @@ smsBody.addEventListener('input', () => {
    Dans l'APK, window.ShamanNative existe : les SMS partent directement,
    sans ouvrir l'appli SMS, avec choix automatique de la SIM. */
 const NATIVE = !!window.ShamanNative;
-const APP_VERSION = '1.11';
+const APP_VERSION = '1.12';
 const nativeCbs = {};
 window.onShamanSms = function(json){
   try{ const e = JSON.parse(json); const cb = nativeCbs[e.id]; if(cb) cb(e); if(e.type === 'done') delete nativeCbs[e.id]; }catch(err){}
@@ -1577,7 +1578,16 @@ function smsPartsText(t){
   if(b.parts < a.parts) r += ` · version simplifiée : ${b.parts} SMS`;
   return r;
 }
+let _skipSig = '';
+function pushSkipToNative(force){
+  if(!NATIVE) return;
+  const sig = blockedSetNow().size + '|' + unrSet().size + '|' + _blkEdge;
+  if(!force && sig === _skipSig) return;
+  _skipSig = sig;
+  try{ ShamanNative.setSkip(JSON.stringify([...blockedSetNow()].concat([...unrSet()]))); }catch(e){}
+}
 function nativeSend(numbers, body, onEvent, bodies, extra){
+  pushSkipToNative(true);
   const id = (extra && extra.id) || ('n' + Date.now() + Math.random().toString(36).slice(2, 6));
   nativeCbs[id] = onEvent;
   const S = simGet();
@@ -1597,6 +1607,7 @@ function nativeDoneText(e){
         : e.cancelled ? `⛔ Envoi arrêté — ${e.sent} envoyé(s)`
         : `✅ Terminé : ${e.sent} envoyé(s), ${e.failed} échec(s)`;
   if(e.switched) t += ` · ${e.switched} bascule(s) sur l'autre SIM`;
+  if(e.skipped) t += ` · ${e.skipped} numéro(s) bloqué(s) ignoré(s)`;
   if(e.failedNumbers && e.failedNumbers.length) t += ' · Non envoyés : ' + e.failedNumbers.slice(0, 8).join(', ') + (e.failedNumbers.length > 8 ? '…' : '');
   return t;
 }
@@ -1626,6 +1637,7 @@ function journalLabel(code, extra){
   if(c === 2) return ['❌', 'Radio éteinte (mode avion ?)'];
   if(c === 4) return ['❌', 'Pas de réseau'];
   if(c === 5) return ['⛔', "Limite d'envoi d'Android atteinte"];
+  if(c === 102) return ['🚫', 'Ignoré : numéro bloqué ou mis de côté'];
   if(c === 100) return ['▶️', 'Envoi démarré'];
   if(c === 101) return ['⚠️', 'Erreur interne du téléphone']; 
   if(c === -1) return ['❌', 'Erreur du téléphone' + (extra ? ' : ' + extra : '')];
@@ -1636,7 +1648,7 @@ const UNREACH_KEY = 'shaman_unreach';
 let _unr = null;
 function unrSet(){ if(!_unr){ try{ _unr = new Set(JSON.parse(localStorage.getItem(UNREACH_KEY) || '[]')); }catch(e){ _unr = new Set(); } } return _unr; }
 function isSkip(n){ return unrSet().has(n); }
-function unrSave(){ try{ localStorage.setItem(UNREACH_KEY, JSON.stringify([...unrSet()])); }catch(e){} }
+function unrSave(){ try{ localStorage.setItem(UNREACH_KEY, JSON.stringify([...unrSet()])); }catch(e){} pushSkipToNative(true); }
 function journalAnalysis(lines){
   const per = {};
   lines.forEach(l => {
@@ -1754,7 +1766,7 @@ function nativeRun(btn, statusEl, numbers, body, onDone){
   btn.disabled = true;
   statusEl.textContent = '⏳ Envoi en cours…';
   nativeSend(numbers, body, e => {
-    if(e.type === 'progress') statusEl.textContent = `⏳ ${e.sent + e.failed} / ${e.total} (échecs : ${e.failed}) · ${e.sim || ''}${e.note ? ' · ' + e.note : ''}`;
+    if(e.type === 'progress') statusEl.textContent = `⏳ ${e.prefix !== undefined ? e.prefix : e.sent + e.failed} / ${e.total} (échecs : ${e.failed}) · ${e.sim || ''}${e.note ? ' · ' + e.note : ''}`;
     else if(e.type === 'error'){ statusEl.textContent = '⚠️ ' + e.message; btn.disabled = false; }
     else if(e.type === 'done'){
       statusEl.textContent = nativeDoneText(e);
@@ -1815,7 +1827,7 @@ function smsAutoAll(){
   simAllStart();
   btns.forEach(b => { b.disabled = true; });
   nativeSendLots(lots, (ev, k, n) => {
-    if(ev.type === 'progress') setSimAllMsg(`⏳ Lot ${k} / ${n} · ${ev.sent + ev.failed} / ${ev.total} SMS · ${ev.sim || ''}${ev.note ? ' · ' + ev.note : ''}`);
+    if(ev.type === 'progress') setSimAllMsg(`⏳ Lot ${k} / ${n} · ${ev.prefix !== undefined ? ev.prefix : ev.sent + ev.failed} / ${ev.total} SMS · ${ev.sim || ''}${ev.note ? ' · ' + ev.note : ''}`);
     else if(ev.type === 'error') setSimAllMsg('⚠️ ' + ev.message);
   }, ev => {
     btns.forEach(b => { if(!b.closest('.batch').classList.contains('done')) b.disabled = false; });
@@ -1839,16 +1851,17 @@ function baseAutoAll(){
   for(let st = base0.cursor; st < base0.numbers.length; st += size){
     const sz = Math.min(size, base0.numbers.length - st);
     const nums = base0.numbers.slice(st, st + sz).map(cleanNum).filter(n => n && !isBlocked(n) && !isSkip(n));
+    const lastNum = base0.numbers[st + sz - 1], isLastLot = st + sz >= base0.numbers.length;
     lots.push({ nums, body: bodyAll, mark: () => {
       const b = db.phoneBases.find(x => x.id === sel); if(!b) return;
-      b.cursor = st + sz; delete b.pendingBatch; b.updatedAt = Date.now();
+      b.cursor = rbCursorAfter(b.numbers, b.cursor, st + sz, lastNum, isLastLot); delete b.pendingBatch; b.updatedAt = Date.now();
       simAdvance(1); saveDB(); updateBaseMeta(b.id); updateBaseSendInfo(); renderCurrentBaseBatch();
     }});
   }
   if(!confirm(`Envoyer automatiquement à ${left} numéro(s), en ${lots.length} lot(s), jusqu'à la fin de la base, avec alternance des SIM ?\n\n${smsPartsText(bodyAll)}`)) return;
   simAllStart();
   nativeSendLots(lots, (ev, k, n) => {
-    if(ev.type === 'progress') setSimAllMsg(`⏳ Lot ${k} / ${n} · ${ev.sent + ev.failed} / ${ev.total} SMS · ${ev.sim || ''}${ev.note ? ' · ' + ev.note : ''}`);
+    if(ev.type === 'progress') setSimAllMsg(`⏳ Lot ${k} / ${n} · ${ev.prefix !== undefined ? ev.prefix : ev.sent + ev.failed} / ${ev.total} SMS · ${ev.sim || ''}${ev.note ? ' · ' + ev.note : ''}`);
     else if(ev.type === 'error') setSimAllMsg('⚠️ ' + ev.message);
   }, ev => simAllFinish(ev.type === 'error' ? '⚠️ ' + ev.message : nativeDoneText(ev)));
 }
@@ -1896,7 +1909,7 @@ function renderSimPickers(){
   });
 }
 renderSimPickers();
-if(NATIVE){ try{ ShamanNative.setKeepAlive(simGet().keep !== false); }catch(e){} }
+if(NATIVE){ try{ ShamanNative.setKeepAlive(simGet().keep !== false); }catch(e){} pushSkipToNative(true); }
 
 const smsSourceRadios = () => Array.from(document.querySelectorAll('input[name="smsSource"]'));
 function getSmsSource(){ const c = smsSourceRadios().find(r => r.checked); return c ? c.value : 'contacts'; }
@@ -2943,11 +2956,16 @@ function rbQuietStopAt(){
   return d.getTime();
 }
 // Enregistre un lot comme envoyé (même effet que « ✓ Envoyé », sans mettre la tâche à « terminée » trop tôt).
-function rbMarkLot(ruleId, jobId, start, n, last){
+function rbCursorAfter(list, cur, fallback, lastNum, isFinal){
+  if(isFinal) return list.length;
+  if(lastNum !== undefined && lastNum !== null){ const i = list.indexOf(lastNum, Math.max(0, cur - 1)); if(i >= 0) return i + 1; }
+  return Math.min(fallback, list.length);
+}
+function rbMarkLot(ruleId, jobId, start, n, last, lastNum){
   const j = db.robotJobs.find(x => x.id === jobId), r = db.robotRules.find(x => x.id === ruleId); if(!j || !r) return;
   (j.log = j.log || []).push({ t: Date.now(), n, from: start });
-  if(r.source === 'base'){ const b = db.phoneBases.find(x => x.id === r.baseId); if(b){ b.cursor = start + n; b.updatedAt = Date.now(); } }
-  else j.idx = start + n;
+  if(r.source === 'base'){ const b = db.phoneBases.find(x => x.id === r.baseId); if(b){ b.cursor = rbCursorAfter(b.numbers, b.cursor, start + n, lastNum, last); b.updatedAt = Date.now(); } }
+  else j.idx = rbCursorAfter(rbList(r), j.idx || 0, start + n, lastNum, last);
   if(last){
     j.status = 'done';
     // Passage complet terminé : les autres horaires déjà échus de la même liste ne refont pas un 2e passage tout de suite.
@@ -2964,7 +2982,7 @@ function rbDescAdvance(d, processed){
   for(let k = 0; k < d.lots.length; k++){
     cum += d.lots[k].m;
     if(k < d.marked) continue;
-    if(processed >= cum){ const L = d.lots[k]; rbMarkLot(d.ruleId, d.jobId, L.start, L.n, d.complete && k === d.lots.length - 1); d.marked = k + 1; changed = true; }
+    if(processed >= cum){ const L = d.lots[k]; rbMarkLot(d.ruleId, d.jobId, L.start, L.n, d.complete && k === d.lots.length - 1, L.last); d.marked = k + 1; changed = true; }
     else break;
   }
   if(changed) rbSaveDesc(d);
@@ -2983,7 +3001,7 @@ function rbOnEvent(d){
     d.seen = true;
     if(ev.type === 'progress'){
       rbDescAdvance(d, ev.prefix !== undefined ? ev.prefix : ev.sent + ev.failed);
-      rbSetLive(`⏳ Robot : ${ev.sent + ev.failed} / ${ev.total} SMS · lot ${Math.min(d.marked + 1, d.lots.length)} / ${d.lots.length} · ${ev.sim || ''}${ev.note ? ' · ' + ev.note : ''}`);
+      rbSetLive(`⏳ Robot : ${ev.prefix !== undefined ? ev.prefix : ev.sent + ev.failed} / ${ev.total} SMS · lot ${Math.min(d.marked + 1, d.lots.length)} / ${d.lots.length} · ${ev.sim || ''}${ev.note ? ' · ' + ev.note : ''}`);
     } else if(ev.type === 'error'){ rbEnd(d, ev); }
     else if(ev.type === 'done'){
       if(!ev.aborted && !ev.cancelled && !ev.paused) rbDescAdvance(d, Infinity);
@@ -3002,7 +3020,7 @@ function rbDrain(it, manual){
     src = b.numbers; startOf = b.cursor;
   } else { src = rbList(r); startOf = j.idx || 0; }
   const size = Math.max(1, r.batchSize || 15);
-  for(let st = startOf; st < src.length; st += size) lots.push({ start: st, n: Math.min(size, src.length - st) });
+  for(let st = startOf; st < src.length; st += size) lots.push({ start: st, n: Math.min(size, src.length - st), last: src[Math.min(st + size, src.length) - 1] });
   if(!lots.length) return;
   // Plafond du jour (si réglé) : on n'envoie que ce qui reste autorisé
   let complete = true;
@@ -3141,6 +3159,7 @@ $r('rbAddBtn').onclick=()=>{
   saveDB(); $r('rbName').value=''; $r('rbBody').value=''; renderRobot();
 };
 function rbTick(){
+  pushSkipToNative(false);
   const ch=rbGenerate();
   if(ch&&!rbQuiet()){ if('Notification' in window&&Notification.permission==='granted') new Notification('🤖 SHAMAN PRODUCTION',{body:'Un envoi de SMS est prêt.'}); if(navigator.vibrate) navigator.vibrate([300,150,300]); }
   if($r('tab-robot').classList.contains('active')) renderRobot();
@@ -3229,6 +3248,8 @@ document.getElementById('addBlockedBtn').addEventListener('click', () => {
   document.getElementById('blockedNumbersInput').value = '';
   saveDB();
   renderBlockedList('');
+  const smsB = document.getElementById('smsBatches');
+  if(smsB && smsB.children.length){ smsB.innerHTML = '<div class="empty">Un numéro vient d\'être bloqué : les lots affichés ont été retirés. Régénérez-les pour continuer.</div>'; }
   if(removedFromBases > 0){ renderBasesList(); refreshBaseSendSelect(); renderCurrentBaseBatch(); }
   if(removedFromContacts > 0){ renderContactList(); }
   let msg = `${added} numéro${added>1?'s':''} bloqué${added>1?'s':''}.${parsed.length - added > 0 ? ' (' + (parsed.length - added) + ' déjà bloqué(s))' : ''}`;
