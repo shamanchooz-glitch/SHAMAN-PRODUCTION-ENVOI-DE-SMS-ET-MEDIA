@@ -1543,7 +1543,7 @@ smsBody.addEventListener('input', () => {
    Dans l'APK, window.ShamanNative existe : les SMS partent directement,
    sans ouvrir l'appli SMS, avec choix automatique de la SIM. */
 const NATIVE = !!window.ShamanNative;
-const APP_VERSION = '1.10';
+const APP_VERSION = '1.11';
 const nativeCbs = {};
 window.onShamanSms = function(json){
   try{ const e = JSON.parse(json); const cb = nativeCbs[e.id]; if(cb) cb(e); if(e.type === 'done') delete nativeCbs[e.id]; }catch(err){}
@@ -1617,7 +1617,7 @@ function nativeSendLots(lots, onProgress, onFinish){
     else if(ev.type === 'done'){ if(!ev.aborted && !ev.cancelled && !ev.paused) advance(Infinity); onFinish(ev); }
   }, bodies);
 }
-function journalLabel(code){
+function journalLabel(code, extra){
   const c = parseInt(code);
   if(c === 0) return ['✅', 'Envoyé'];
   if(c === -2) return ['⏳', "Android n'a pas répondu (confirmation de limite SMS ?)"];
@@ -1628,9 +1628,15 @@ function journalLabel(code){
   if(c === 5) return ['⛔', "Limite d'envoi d'Android atteinte"];
   if(c === 100) return ['▶️', 'Envoi démarré'];
   if(c === 101) return ['⚠️', 'Erreur interne du téléphone']; 
+  if(c === -1) return ['❌', 'Erreur du téléphone' + (extra ? ' : ' + extra : '')];
   return ['❌', 'Erreur ' + c];
 }
 let journalOnlyFail = false, journalText = '';
+const UNREACH_KEY = 'shaman_unreach';
+let _unr = null;
+function unrSet(){ if(!_unr){ try{ _unr = new Set(JSON.parse(localStorage.getItem(UNREACH_KEY) || '[]')); }catch(e){ _unr = new Set(); } } return _unr; }
+function isSkip(n){ return unrSet().has(n); }
+function unrSave(){ try{ localStorage.setItem(UNREACH_KEY, JSON.stringify([...unrSet()])); }catch(e){} }
 function journalAnalysis(lines){
   const per = {};
   lines.forEach(l => {
@@ -1640,7 +1646,7 @@ function journalAnalysis(lines){
   });
   const both = [], one = [];
   Object.keys(per).forEach(n => { const o = per[n]; if(o.ok) return; (o.bad.size >= 2 ? both : one).push(n); });
-  return { both, one };
+  return { both, one, distinct: Object.keys(per).length };
 }
 function renderJournal(){
   const box = document.getElementById('journalBox'); if(!box) return;
@@ -1665,20 +1671,30 @@ function renderJournal(){
   box.innerHTML = `<div style="font-weight:700;">Dernière heure : ${ok} envoyé(s), ${ko} échec(s)</div>` +
     `<div style="font-size:12.5px;margin:2px 0 6px;">${escapeHtml(simLine)}</div>` +
     (avgParts > 1 ? `<div style="font-size:12.5px;margin:0 0 6px;">📨 Vos messages comptent en moyenne <b>${avgParts} SMS</b> par destinataire (crédit consommé ×${avgParts}).</div>` : '') +
-    `<div style="font-size:12.5px;margin:0 0 10px;">Numéros en échec : <b>${an.one.length + an.both.length}</b> — dont <b>${an.both.length}</b> ont échoué sur les 2 SIM (numéro probablement inactif ou bloqué).</div>` +
+    `<div style="font-size:12.5px;margin:0 0 10px;">Numéros en échec : <b>${an.one.length + an.both.length}</b> sur ${an.distinct} testés (${an.distinct ? Math.round((an.one.length + an.both.length) * 100 / an.distinct) : 0} %) — dont <b>${an.both.length}</b> ont échoué sur les 2 SIM (numéro probablement inactif ou bloqué).${unrSet().size ? ` <b>${unrSet().size}</b> numéro(s) mis de côté.` : ''}</div>` +
     (rows.length ? rows.map(r => {
-      const [ic, txt] = journalLabel(r[3]);
+      const [ic, txt] = journalLabel(r[3], r[5]);
       const pp = r[4] && parseInt(r[4]) > 1 ? ` · ${parseInt(r[4])} SMS` : '';
       return `<div style="font-size:12.5px;padding:5px 0;border-bottom:1px solid #cfe3f0;">${ic} <b>${escapeHtml(fmt(r))}</b> · ${escapeHtml(r[1])} · ${escapeHtml(r[2])}${pp}<br><span style="color:#5b7184;">${escapeHtml(txt)}</span></div>`;
     }).join('') : '<div class="empty">Aucun échec.</div>');
   if(retry) retry.innerHTML = (an.one.length || an.both.length) ?
     `<div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:6px;">` +
     (an.one.length ? `<button type="button" class="btn btn-primary btn-small" data-journal-retry="soft" style="flex:1 1 100%;">🔁 Réessayer les échecs récupérables (${an.one.length})</button>` : '') +
-    `<button type="button" class="btn btn-secondary btn-small" data-journal-retry="all" style="flex:1 1 100%;">Réessayer tous les échecs (${an.one.length + an.both.length})</button></div>` : '';
+    `<button type="button" class="btn btn-secondary btn-small" data-journal-retry="all" style="flex:1 1 100%;">Réessayer tous les échecs (${an.one.length + an.both.length})</button>` +
+    (an.both.length ? `<button type="button" class="btn btn-secondary btn-small" data-journal-retry="skip" style="flex:1 1 100%;">🚫 Mettre de côté les ${an.both.length} numéros injoignables</button>` : '') +
+    (unrSet().size ? `<button type="button" class="btn btn-secondary btn-small" data-journal-retry="unskip" style="flex:1 1 100%;">↩️ Remettre en service les ${unrSet().size} numéros mis de côté</button>` : '') + `</div>` : '';
 }
 function journalRetry(kind){
   let lines = []; try{ lines = JSON.parse(ShamanNative.getJournal(5000)); }catch(e){}
   const an = journalAnalysis(lines);
+  if(kind === 'unskip'){
+    if(!confirm(`Remettre en service les ${unrSet().size} numéros mis de côté ?`)) return;
+    _unr = new Set(); unrSave(); renderJournal(); return;
+  }
+  if(kind === 'skip'){
+    if(!confirm(`Mettre de côté ${an.both.length} numéros qui ont échoué sur les 2 SIM ?\n\nLe robot et « Tout envoyer » sur les bases les ignoreront (gain de temps : un échec coûte 30 à 100 s). Vos contacts et vos bases ne sont pas modifiés, et vous pourrez les remettre en service ici.`)) return;
+    an.both.forEach(n => unrSet().add(n)); unrSave(); renderJournal(); return;
+  }
   const nums = kind === 'all' ? an.one.concat(an.both) : an.one;
   if(!nums.length){ alert('Aucun échec à réessayer.'); return; }
   let body = ''; try{ body = localStorage.getItem('shaman_last_body') || ''; }catch(e){}
@@ -1822,7 +1838,7 @@ function baseAutoAll(){
   const lots = [];
   for(let st = base0.cursor; st < base0.numbers.length; st += size){
     const sz = Math.min(size, base0.numbers.length - st);
-    const nums = base0.numbers.slice(st, st + sz).map(cleanNum).filter(n => n && !isBlocked(n));
+    const nums = base0.numbers.slice(st, st + sz).map(cleanNum).filter(n => n && !isBlocked(n) && !isSkip(n));
     lots.push({ nums, body: bodyAll, mark: () => {
       const b = db.phoneBases.find(x => x.id === sel); if(!b) return;
       b.cursor = st + sz; delete b.pendingBatch; b.updatedAt = Date.now();
@@ -3001,7 +3017,7 @@ function rbDrain(it, manual){
   const msg = simGet().simplify ? smsSimplify(it.msg) : it.msg;
   try{ localStorage.setItem('shaman_last_body', msg); }catch(e){}
   lots.forEach(L => {
-    const arr = src.slice(L.start, L.start + L.n).map(cleanNum).filter(n => n && !isBlocked(n));
+    const arr = src.slice(L.start, L.start + L.n).map(cleanNum).filter(n => n && !isBlocked(n) && !isSkip(n));
     L.m = arr.length; arr.forEach(n => { nums.push(n); bodies.push(msg); });
   });
   const nid = 'rb' + Date.now();
