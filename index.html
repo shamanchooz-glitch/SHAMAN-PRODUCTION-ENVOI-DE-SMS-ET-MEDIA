@@ -488,7 +488,7 @@
       </div>
       <div id="smsRecipientPicker"></div>
       <div id="smsNumbersWrap" style="display:none;">
-        <textarea id="smsNumbersInput" placeholder="Un numéro par ligne (ou séparés par une virgule)" style="min-height:90px;"></textarea>
+        <textarea id="smsNumbersInput" inputmode="tel" placeholder="Un numéro par ligne (ou séparés par une virgule)" style="min-height:90px;"></textarea>
         <label>Indicatif à appliquer aux numéros sans indicatif</label>
         <select id="smsNumbersDial"></select>
       </div>
@@ -604,7 +604,7 @@
         <div class="counter" id="schedBaseInfo" style="text-align:left;margin-top:4px;"></div>
       </div>
       <div id="schedNumbersWrap" style="display:none;">
-        <textarea id="schedNumbersInput" placeholder="Un numéro par ligne (ou séparés par une virgule)" style="min-height:90px;"></textarea>
+        <textarea id="schedNumbersInput" inputmode="tel" placeholder="Un numéro par ligne (ou séparés par une virgule)" style="min-height:90px;"></textarea>
         <label>Indicatif à appliquer aux numéros sans indicatif</label>
         <select id="schedNumbersDial"></select>
       </div>
@@ -659,7 +659,7 @@
       <label class="check-row" style="margin-top:8px;"><input type="checkbox" id="rbDefSched" checked> Utiliser la programmation par défaut</label>
       <div id="rbCustom" style="display:none;"><label>Jours</label><div class="row" id="rbDays" style="flex-wrap:wrap;gap:4px;"></div>
       <label>Heures (séparées par une virgule)</label><input id="rbTimes" value="09:00"></div>
-      <label>Envoyer depuis (facultatif — laissez vide pour utiliser les réglages SIM 1 / SIM 2 ; sinon plusieurs numéros séparés par une virgule = alternance à chaque lot)</label><input id="rbSender" placeholder="Ex. +225 07... , +225 05...">
+      <label>Envoyer depuis (facultatif — laissez vide pour utiliser les réglages SIM 1 / SIM 2 ; sinon plusieurs numéros séparés par une virgule = alternance à chaque lot)</label><input id="rbSender" inputmode="tel" placeholder="Ex. +225 07... , +225 05...">
       <button class="btn btn-primary" id="rbAddBtn" style="margin-top:10px;">➕ Ajouter au robot</button>
     </div>
     <div class="card">
@@ -730,7 +730,7 @@
     </div>
     <div class="card">
       <h2>Numéros bloqués (<span id="blockedCount">0</span>)</h2>
-      <input type="text" id="blockedFilterInput" placeholder="Rechercher un numéro bloqué…" style="margin-bottom:10px;">
+      <input type="text" inputmode="tel" id="blockedFilterInput" placeholder="Rechercher un numéro bloqué…" style="margin-bottom:10px;">
       <div id="blockedList"><div class="empty">Aucun numéro bloqué.</div></div>
     </div>
   </div>
@@ -1544,7 +1544,7 @@ smsBody.addEventListener('input', () => {
    Dans l'APK, window.ShamanNative existe : les SMS partent directement,
    sans ouvrir l'appli SMS, avec choix automatique de la SIM. */
 const NATIVE = !!window.ShamanNative;
-const APP_VERSION = '1.12';
+const APP_VERSION = '1.13';
 const nativeCbs = {};
 window.onShamanSms = function(json){
   try{ const e = JSON.parse(json); const cb = nativeCbs[e.id]; if(cb) cb(e); if(e.type === 'done') delete nativeCbs[e.id]; }catch(err){}
@@ -1595,7 +1595,7 @@ function nativeSend(numbers, body, onEvent, bodies, extra){
   const sb = t => S.simplify ? (cache[t] !== undefined ? cache[t] : (cache[t] = smsSimplify(t))) : t;
   const body2 = sb(body || ''), bodies2 = bodies ? bodies.map(sb) : bodies;
   try{ localStorage.setItem('shaman_last_body', (bodies2 && bodies2[0]) || body2 || ''); }catch(e){}
-  const r = ShamanNative.sendSms(JSON.stringify({ id, numbers, body: body2, bodies: bodies2, mode: S.mode, delay: S.delay, stopAt: (extra && extra.stopAt) || 0 }));
+  const r = ShamanNative.sendSms(JSON.stringify({ id, numbers, body: body2, bodies: bodies2, mode: S.mode, delay: S.delay, serial: !!S.serial, stopAt: (extra && extra.stopAt) || 0 }));
   if(r !== 'ok'){ delete nativeCbs[id]; onEvent({ id, type: 'error', message: r }); }
   return id;
 }
@@ -1687,7 +1687,9 @@ function renderJournal(){
     (rows.length ? rows.map(r => {
       const [ic, txt] = journalLabel(r[3], r[5]);
       const pp = r[4] && parseInt(r[4]) > 1 ? ` · ${parseInt(r[4])} SMS` : '';
-      return `<div style="font-size:12.5px;padding:5px 0;border-bottom:1px solid #cfe3f0;">${ic} <b>${escapeHtml(fmt(r))}</b> · ${escapeHtml(r[1])} · ${escapeHtml(r[2])}${pp}<br><span style="color:#5b7184;">${escapeHtml(txt)}</span></div>`;
+      const bad = parseInt(r[3]) !== 0 && parseInt(r[3]) < 100;
+      const test = bad ? ` · <a href="sms:${escapeHtml(r[1])}" style="color:#2a8fc4;font-weight:700;">💬 Tester à la main</a>` : '';
+      return `<div style="font-size:12.5px;padding:5px 0;border-bottom:1px solid #cfe3f0;">${ic} <b>${escapeHtml(fmt(r))}</b> · ${escapeHtml(r[1])} · ${escapeHtml(r[2])}${pp}<br><span style="color:#5b7184;">${escapeHtml(txt)}</span>${test}</div>`;
     }).join('') : '<div class="empty">Aucun échec.</div>');
   if(retry) retry.innerHTML = (an.one.length || an.both.length) ?
     `<div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:6px;">` +
@@ -1788,7 +1790,7 @@ if(NATIVE){
    Réglages gardés sur CE téléphone (localStorage), pas synchronisés,
    car les cartes SIM sont propres à chaque appareil. */
 const SIM_KEY = 'shaman_sim_v1';
-const SIM_DEFAULT = { mode: 'alt', sim1: '07 49 97 09 18', sim2: '07 48 93 56 86', seq: 0, delay: 3, keep: true };
+const SIM_DEFAULT = { mode: 'alt', sim1: '07 49 97 09 18', sim2: '07 48 93 56 86', seq: 0, delay: 3, keep: true, serial: false };
 function simGet(){
   try{ return Object.assign({}, SIM_DEFAULT, JSON.parse(localStorage.getItem(SIM_KEY) || '{}')); }
   catch(e){ return Object.assign({}, SIM_DEFAULT); }
@@ -1880,6 +1882,7 @@ function renderSimPickers(){
       ${NATIVE ? `<div style="font-size:12.5px;margin-top:8px;">${nativeSims().map(x => '📶 SIM ' + (x.slot + 1) + ' : ' + escapeHtml(x.name || '') + (x.number ? ' · ' + escapeHtml(x.number) : '')).join('<br>') || '⚠️ Aucune SIM détectée (autorisez « Téléphone » pour l\'app).'}</div>
       <div style="font-size:12px;color:var(--text-dim);margin-top:6px;">📦 Version de l'application : ${APP_VERSION}</div>
       <label class="check-row" style="margin-top:10px;"><input type="checkbox" data-sim-keep ${S.keep !== false ? 'checked' : ''}> 🔋 Garder l'app active en arrière-plan (les envois continuent écran éteint, pendant un appel ou dans une autre appli)</label>
+      <label class="check-row" style="margin-top:10px;"><input type="checkbox" data-sim-serial ${S.serial ? 'checked' : ''}> 🐢 Mode prudent : un seul SMS à la fois sur tout le téléphone (plus lent ; à essayer si trop d'échecs)</label>
       <label class="check-row" style="margin-top:10px;"><input type="checkbox" data-sim-simplify ${S.simplify ? 'checked' : ''}> ✂️ Simplifier les messages (retire ê î ô â û ç, emojis et guillemets spéciaux) : moins de SMS facturés par personne</label>
       <div style="font-size:12px;color:var(--text-dim);">${escapeHtml((() => { try{ return smsPartsText(localStorage.getItem('shaman_last_body') || ''); }catch(e){ return ''; } })())}</div>
       <button type="button" class="btn btn-secondary btn-small" data-sim-battery style="margin-top:6px;">${(()=>{ try{ return ShamanNative.isBatteryExempt() ? '✅ Batterie : sans restriction' : '⚙️ Autoriser sans restriction de batterie'; }catch(e){ return '⚙️ Batterie'; } })()}</button>
@@ -1900,6 +1903,7 @@ function renderSimPickers(){
     const stp = el.querySelector('[data-sim-stop]'); if(stp) stp.addEventListener('click', () => { simAllStop = true; setSimAllMsg('⛔ Arrêt demandé…'); try{ ShamanNative.cancel(); }catch(e){} setTimeout(() => { if(simAllRunning) simAllFinish('⛔ Envoi arrêté.'); }, 4000); });
     const all = el.querySelector('[data-sim-all]'); if(all) all.addEventListener('click', () => { if(el.dataset.ctx === 'base') baseAutoAll(); else smsAutoAll(); });
     const kp = el.querySelector('[data-sim-keep]'); if(kp) kp.addEventListener('change', () => { simSet({ keep: kp.checked }); try{ ShamanNative.setKeepAlive(kp.checked); }catch(e){} renderSimPickers(); });
+    const se = el.querySelector('[data-sim-serial]'); if(se) se.addEventListener('change', () => { simSet({ serial: se.checked }); renderSimPickers(); });
     const sp = el.querySelector('[data-sim-simplify]'); if(sp) sp.addEventListener('change', () => { simSet({ simplify: sp.checked }); renderSimPickers(); });
     const bt = el.querySelector('[data-sim-battery]'); if(bt) bt.addEventListener('click', () => { try{ ShamanNative.requestBatteryExemption(); }catch(e){} setTimeout(renderSimPickers, 1500); });
     const dl = el.querySelector('[data-sim-delay]');
@@ -3047,7 +3051,7 @@ function rbDrain(it, manual){
   if(!nums.length){ rbEnd(d, { type: 'done', sent: 0, failed: 0, total: 0 }); return; }
   rbSetLive(`⏳ Robot : démarrage — ${nums.length} destinataires en ${lots.length} lot(s) · ${smsParts(msg).parts} SMS facturé(s) chacun…`);
   const stopAt = manual ? 0 : rbQuietStopAt();
-  const res = ShamanNative.sendSms(JSON.stringify({ id: nid, numbers: nums, body: '', bodies, mode: simGet().mode, delay: simGet().delay, stopAt }));
+  const res = ShamanNative.sendSms(JSON.stringify({ id: nid, numbers: nums, body: '', bodies, mode: simGet().mode, delay: simGet().delay, serial: !!simGet().serial, stopAt }));
   if(res !== 'ok'){ rbOnEvent(d)({ type: 'error', message: res }); return; }
   // Garde-fou : si le téléphone ne répond pas dans les 25 s, on le dit au lieu de rester bloqué sur « démarrage ».
   setTimeout(() => {
@@ -3508,7 +3512,7 @@ function openBaseNumbersView(baseId){
   const panel = document.getElementById('base-view-' + baseId);
   if(!panel) return;
   panel.innerHTML = `
-    <input type="text" placeholder="Filtrer les numéros…" id="base-filter-${baseId}" style="margin-bottom:8px;">
+    <input type="text" inputmode="tel" placeholder="Filtrer les numéros…" id="base-filter-${baseId}" style="margin-bottom:8px;">
     <div id="base-rows-${baseId}" style="max-height:320px;overflow-y:auto;"></div>`;
   const filterInput = document.getElementById(`base-filter-${baseId}`);
   filterInput.addEventListener('input', () => renderBaseNumbersRows(baseId, filterInput.value));
