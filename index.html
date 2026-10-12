@@ -1544,7 +1544,7 @@ smsBody.addEventListener('input', () => {
    Dans l'APK, window.ShamanNative existe : les SMS partent directement,
    sans ouvrir l'appli SMS, avec choix automatique de la SIM. */
 const NATIVE = !!window.ShamanNative;
-const APP_VERSION = '1.13';
+const APP_VERSION = '1.15';
 const nativeCbs = {};
 window.onShamanSms = function(json){
   try{ const e = JSON.parse(json); const cb = nativeCbs[e.id]; if(cb) cb(e); if(e.type === 'done') delete nativeCbs[e.id]; }catch(err){}
@@ -1762,7 +1762,366 @@ function initJournalUi(){
   setInterval(() => { if(m.style.display === 'block'){ renderJournal(); renderJournalState(); } }, 3000);
 }
 if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initJournalUi); else initJournalUi();
-function cleanNum(n){ return String(n).replace(/\s+/g, ''); }
+/* ================= QR CODE (généré dans l'app, sans internet) ================= */
+const QRGen = (function(){
+  const ECC = [-1,10,16,26,18,24,16,18,22,22,26];   // octets de correction par bloc, niveau M, versions 1 à 10
+  const NBLK = [-1,1,1,1,2,2,4,4,4,5,5];            // nombre de blocs, niveau M
+  function numRaw(v){ let r = (16*v + 128)*v + 64; if(v >= 2){ const na = Math.floor(v/7) + 2; r -= (25*na - 10)*na - 55; if(v >= 7) r -= 36; } return r; }
+  function numData(v){ return Math.floor(numRaw(v)/8) - ECC[v]*NBLK[v]; }
+  function mul(x, y){ let z = 0; for(let i = 7; i >= 0; i--){ z = (z << 1) ^ ((z >>> 7) * 0x11D); z ^= ((y >>> i) & 1) * x; } return z; }
+  function rsGen(deg){ const res = new Array(deg).fill(0); res[deg-1] = 1; let root = 1; for(let i = 0; i < deg; i++){ for(let j = 0; j < deg; j++){ res[j] = mul(res[j], root); if(j + 1 < deg) res[j] ^= res[j+1]; } root = mul(root, 2); } return res; }
+  function rsRem(data, div){ const res = div.map(() => 0); for(const b of data){ const f = b ^ res.shift(); res.push(0); div.forEach((c, i) => { res[i] ^= mul(c, f); }); } return res; }
+  function interleave(data, v){
+    const nb = NBLK[v], be = ECC[v], raw = Math.floor(numRaw(v)/8), ns = nb - raw % nb, sl = Math.floor(raw/nb);
+    const blocks = [], div = rsGen(be);
+    for(let i = 0, k = 0; i < nb; i++){
+      const dat = data.slice(k, k + sl - be + (i < ns ? 0 : 1)); k += dat.length;
+      const ecc = rsRem(dat, div); if(i < ns) dat.push(0); blocks.push(dat.concat(ecc));
+    }
+    const out = [];
+    for(let i = 0; i < blocks[0].length; i++) blocks.forEach((b, j) => { if(i != sl - be || j >= ns) out.push(b[i]); });
+    return out;
+  }
+  function make(text){
+    const bytes = Array.from(new TextEncoder().encode(text));
+    let ver = 1;
+    for(; ver <= 10; ver++){ const cap = numData(ver) * 8; const need = 4 + (ver < 10 ? 8 : 16) + 8 * bytes.length; if(need <= cap) break; }
+    if(ver > 10) throw new Error('Texte trop long pour le QR code');
+    const bits = [];
+    const put = (val, len) => { for(let i = len - 1; i >= 0; i--) bits.push((val >>> i) & 1); };
+    put(4, 4); put(bytes.length, ver < 10 ? 8 : 16); bytes.forEach(b => put(b, 8));
+    const cap = numData(ver) * 8;
+    put(0, Math.min(4, cap - bits.length)); put(0, (8 - bits.length % 8) % 8);
+    for(let pad = 0xEC; bits.length < cap; pad ^= 0xEC ^ 0x11) put(pad, 8);
+    const data = []; for(let i = 0; i < bits.length; i += 8){ let b = 0; for(let j = 0; j < 8; j++) b = (b << 1) | bits[i + j]; data.push(b); }
+    const all = interleave(data, ver);
+    const size = ver * 4 + 17;
+    const mod = Array.from({ length: size }, () => new Array(size).fill(false));
+    const fn = Array.from({ length: size }, () => new Array(size).fill(false));
+    const setF = (x, y, d) => { mod[y][x] = d; fn[y][x] = true; };
+    for(let i = 0; i < size; i++){ setF(6, i, i % 2 == 0); setF(i, 6, i % 2 == 0); }
+    const finder = (cx, cy) => { for(let dy = -4; dy <= 4; dy++) for(let dx = -4; dx <= 4; dx++){ const d = Math.max(Math.abs(dx), Math.abs(dy)), x = cx + dx, y = cy + dy; if(x >= 0 && x < size && y >= 0 && y < size) setF(x, y, d != 2 && d != 4); } };
+    finder(3, 3); finder(size - 4, 3); finder(3, size - 4);
+    const al = []; if(ver > 1){ const na = Math.floor(ver/7) + 2, step = Math.ceil((ver*4 + 4)/(na*2 - 2)) * 2; al.push(6); for(let p = size - 7; al.length < na; p -= step) al.splice(1, 0, p); }
+    al.forEach((ax, i) => al.forEach((ay, j) => {
+      if((i == 0 && j == 0) || (i == 0 && j == al.length - 1) || (i == al.length - 1 && j == 0)) return;
+      for(let dy = -2; dy <= 2; dy++) for(let dx = -2; dx <= 2; dx++) setF(ax + dx, ay + dy, Math.max(Math.abs(dx), Math.abs(dy)) != 1);
+    }));
+    const drawFormat = mask => {
+      const d = (0 << 3) | mask; let rem = d; for(let i = 0; i < 10; i++) rem = (rem << 1) ^ ((rem >>> 9) * 0x537);
+      const b = ((d << 10) | rem) ^ 0x5412, g = i => ((b >>> i) & 1) != 0;
+      for(let i = 0; i <= 5; i++) setF(8, i, g(i)); setF(8, 7, g(6)); setF(8, 8, g(7)); setF(7, 8, g(8)); for(let i = 9; i < 15; i++) setF(14 - i, 8, g(i));
+      for(let i = 0; i < 8; i++) setF(size - 1 - i, 8, g(i)); for(let i = 8; i < 15; i++) setF(8, size - 15 + i, g(i)); setF(8, size - 8, true);
+    };
+    drawFormat(0);
+    if(ver >= 7){ let rem = ver; for(let i = 0; i < 12; i++) rem = (rem << 1) ^ ((rem >>> 11) * 0x1F25); const b = (ver << 12) | rem;
+      for(let i = 0; i < 18; i++){ const bit = ((b >>> i) & 1) != 0, a = size - 11 + i % 3, c = Math.floor(i / 3); setF(a, c, bit); setF(c, a, bit); } }
+    let i = 0;
+    for(let right = size - 1; right >= 1; right -= 2){ if(right == 6) right = 5;
+      for(let vert = 0; vert < size; vert++) for(let j = 0; j < 2; j++){ const x = right - j, up = ((right + 1) & 2) == 0, y = up ? size - 1 - vert : vert;
+        if(!fn[y][x] && i < all.length * 8){ mod[y][x] = ((all[i >>> 3] >>> (7 - (i & 7))) & 1) != 0; i++; } } }
+    const applyMask = m => { for(let y = 0; y < size; y++) for(let x = 0; x < size; x++){ let inv;
+      switch(m){ case 0: inv = (x + y) % 2 == 0; break; case 1: inv = y % 2 == 0; break; case 2: inv = x % 3 == 0; break; case 3: inv = (x + y) % 3 == 0; break;
+        case 4: inv = (Math.floor(x/3) + Math.floor(y/2)) % 2 == 0; break; case 5: inv = x*y % 2 + x*y % 3 == 0; break; case 6: inv = (x*y % 2 + x*y % 3) % 2 == 0; break; default: inv = ((x + y) % 2 + x*y % 3) % 2 == 0; }
+      if(!fn[y][x] && inv) mod[y][x] = !mod[y][x]; } };
+    const penalty = () => {
+      let p = 0;
+      const runs = line => { let run = 1, s = 0; for(let k = 1; k < line.length; k++){ if(line[k] == line[k-1]) run++; else { if(run >= 5) s += 3 + run - 5; run = 1; } } if(run >= 5) s += 3 + run - 5; return s; };
+      const pat = (line) => { const str = line.map(v => v ? '1' : '0').join(''); let s = 0; for(const q of ['10111010000', '00001011101']){ let at = -1; while((at = str.indexOf(q, at + 1)) >= 0) s += 40; } return s; };
+      for(let y = 0; y < size; y++){ const row = mod[y]; p += runs(row) + pat(row); }
+      for(let x = 0; x < size; x++){ const col = mod.map(r => r[x]); p += runs(col) + pat(col); }
+      for(let y = 0; y < size - 1; y++) for(let x = 0; x < size - 1; x++){ const c = mod[y][x]; if(c == mod[y][x+1] && c == mod[y+1][x] && c == mod[y+1][x+1]) p += 3; }
+      let dark = 0; mod.forEach(r => r.forEach(v => { if(v) dark++; })); const tot = size * size; p += (Math.ceil(Math.abs(dark * 20 - tot * 10) / tot) - 1) * 10;
+      return p;
+    };
+    let best = 0, bestP = 1e9;
+    for(let m = 0; m < 8; m++){ applyMask(m); drawFormat(m); const p = penalty(); if(p < bestP){ bestP = p; best = m; } applyMask(m); }
+    applyMask(best); drawFormat(best);
+    return { size, mod, version: ver };
+  }
+  function draw(canvas, text, px){
+    const q = make(text), quiet = 4, n = q.size + quiet * 2, scale = Math.max(2, Math.floor((px || 260) / n));
+    canvas.width = canvas.height = n * scale; const g = canvas.getContext('2d');
+    g.fillStyle = '#fff'; g.fillRect(0, 0, canvas.width, canvas.height); g.fillStyle = '#000';
+    for(let y = 0; y < q.size; y++) for(let x = 0; x < q.size; x++) if(q.mod[y][x]) g.fillRect((x + quiet) * scale, (y + quiet) * scale, scale, scale);
+    return q.version;
+  }
+  return { make, draw };
+})();
+
+
+/* ================= IMPORTS DE NUMÉROS (avec accord des personnes) ================= */
+function normCI(raw){
+  const s0 = String(raw == null ? '' : raw).trim();
+  let d = s0.replace(/\D/g, '');
+  if(!d) return null;
+  const intl = s0.startsWith('+') || s0.startsWith('00');
+  if(s0.startsWith('00')) d = d.slice(2);
+  if(d.length === 13 && d.startsWith('225')) return { num: '+' + d, kind: d[3] === '0' ? 'mobile' : 'fixe' };
+  if(d.length === 10 && d[0] === '0') return { num: '+225' + d, kind: 'mobile' };
+  if(d.length === 10 && d[0] === '2') return { num: '+225' + d, kind: 'fixe' };
+  if(d.length === 8 && !intl) return { num: null, kind: 'ancien', raw: s0 };
+  if(intl && d.length >= 9 && d.length <= 15 && !d.startsWith('225')) return { num: '+' + d, kind: 'etranger' };
+  return { num: null, kind: 'invalide', raw: s0 };
+}
+// Trouve les numéros dans un texte quelconque (liste, CSV, vCard, discussion collée…)
+function extractNumbers(text){
+  const out = [];
+  String(text || '').split(/[\n\r,;|\t]+/).forEach(chunk => {
+    const c = chunk.trim(); if(!c) return;
+    const digits = c.replace(/\D/g, '');
+    if(digits.length < 7) return;
+    if(digits.length <= 15){ out.push(c); return; }
+    const re = /(?:(?:\+|00)?\s*225[\s.\-]*)?0(?:[\s.\-]*\d){9}/g; let m;
+    while((m = re.exec(c)) !== null) out.push(m[0]);
+  });
+  return out;
+}
+function baseById(id){ return db.phoneBases.find(x => x.id === id); }
+function addNumbersToBase(baseId, text){
+  const b = baseById(baseId); const r = { added: 0, already: 0, bad: 0, blocked: 0 };
+  if(!b) return r;
+  const have = new Set(b.numbers);
+  extractNumbers(text).forEach(raw => {
+    const n = normCI(raw);
+    if(!n || n.kind !== 'mobile'){ r.bad++; return; }
+    if(isBlocked(n.num)){ r.blocked++; return; }
+    if(have.has(n.num)){ r.already++; return; }
+    have.add(n.num); b.numbers.push(n.num); r.added++;
+  });
+  if(r.added){ b.updatedAt = Date.now(); saveDB(); updateBaseMeta(b.id); refreshBaseSendSelect(); }
+  return r;
+}
+function sheetOpen(title, html){
+  let m = document.getElementById('importSheet');
+  if(!m){
+    m = document.createElement('div'); m.id = 'importSheet';
+    m.style.cssText = 'display:none;position:fixed;inset:0;z-index:1100;background:#EAF5FC;overflow:auto;padding:14px;padding-top:calc(14px + env(safe-area-inset-top,0px));padding-bottom:calc(24px + env(safe-area-inset-bottom,0px));';
+    document.body.appendChild(m);
+  }
+  m.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><h2 style="margin:0;">${title}</h2><button type="button" class="btn btn-secondary btn-small" id="sheetClose" style="width:auto;">✕ Fermer</button></div><div id="sheetBody" style="margin-top:10px;"></div>`;
+  m.querySelector('#sheetBody').innerHTML = html;
+  m.querySelector('#sheetClose').addEventListener('click', sheetClose);
+  m.style.display = 'block'; m.scrollTop = 0;
+  const f = document.getElementById('journalFab'); if(f) f.style.display = 'none';
+  return m.querySelector('#sheetBody');
+}
+function sheetClose(){
+  const m = document.getElementById('importSheet'); if(m) m.style.display = 'none';
+  const f = document.getElementById('journalFab'), jm = document.getElementById('journalModal');
+  if(f && (!jm || jm.style.display !== 'block')) f.style.display = 'block';
+}
+let permRetry = null;
+window.onShamanPerm = function(){ const f = permRetry; permRetry = null; if(f) f(); };
+function nativeRead(call, onOk, tries){
+  tries = tries || 0;
+  let res; try{ res = JSON.parse(call()); }catch(e){ alert('Lecture impossible : ' + e); return; }
+  if(res && res.need === 'perm'){
+    if(tries >= 1){ alert("Autorisation refusée. Ouvrez Paramètres Android → Applications → SHAMAN SMS → Autorisations, puis autorisez l'accès demandé."); return; }
+    permRetry = () => nativeRead(call, onOk, tries + 1);
+    return;   // la fenêtre Android s'affiche ; la lecture reprend toute seule après votre choix
+  }
+  if(!res || !res.ok){ alert('Lecture impossible : ' + ((res && res.err) || 'erreur inconnue')); return; }
+  onOk(res);
+}
+function importReview(baseId, title, items){
+  const b = baseById(baseId); if(!b) return;
+  const have = new Set(b.numbers), seen = new Set(), labels = {}, fresh = [], ignored = [];
+  const st = { inBase: 0, blocked: 0, dups: 0 };
+  items.forEach(it => {
+    const r = normCI(it.raw); if(!r) return;
+    if(r.kind === 'ancien'){ ignored.push(`${it.raw} → ancien format à 8 chiffres (ajoutez 01, 05 ou 07 devant, à la main)`); return; }
+    if(r.kind === 'invalide'){ ignored.push(`${it.raw} → format invalide`); return; }
+    if(r.kind === 'fixe'){ ignored.push(`${r.num} → ligne fixe (ne reçoit pas de SMS)`); return; }
+    if(r.kind === 'etranger'){ ignored.push(`${r.num} → numéro étranger (à ajouter à la main si besoin)`); return; }
+    if(isBlocked(r.num)){ st.blocked++; return; }
+    if(have.has(r.num)){ st.inBase++; return; }
+    if(seen.has(r.num)){ st.dups++; return; }
+    seen.add(r.num); fresh.push(r.num); if(it.label) labels[r.num] = it.label;
+  });
+  const lab = Object.keys(labels);
+  const body = sheetOpen(title, `
+    <div style="font-size:14px;line-height:1.5;"><b>${fresh.length}</b> nouveau(x) numéro(s) à ajouter à « ${escapeHtml(b.name)} ».<br>
+    ${st.inBase} déjà dans la base · ${st.blocked} bloqué(s) · ${st.dups} doublon(s) · ${ignored.length} ignoré(s) (format)</div>
+    <p class="dim">Vérifiez la liste : vous pouvez corriger ou effacer des lignes avant d'ajouter.</p>
+    <textarea id="irText" inputmode="tel" style="min-height:240px;">${escapeHtml(fresh.join('\n'))}</textarea>
+    <div class="row" style="gap:8px;margin:10px 0;"><button type="button" class="btn btn-primary" id="irAdd" style="flex:2 1 0;">✅ Ajouter à la base</button><button type="button" class="btn btn-secondary" id="irCancel" style="flex:1 1 0;">Annuler</button></div>
+    ${ignored.length ? `<details><summary style="font-weight:700;">Voir les ${ignored.length} numéros ignorés</summary><div style="font-size:12.5px;">${ignored.slice(0, 120).map(escapeHtml).join('<br>')}${ignored.length > 120 ? '<br>…' : ''}</div></details>` : ''}
+    ${lab.length ? `<details style="margin-top:6px;"><summary style="font-weight:700;">Noms / détails (${lab.length})</summary><div style="font-size:12.5px;">${lab.slice(0, 120).map(n => escapeHtml(n + ' — ' + labels[n])).join('<br>')}${lab.length > 120 ? '<br>…' : ''}</div></details>` : ''}`);
+  body.querySelector('#irCancel').addEventListener('click', sheetClose);
+  body.querySelector('#irAdd').addEventListener('click', () => {
+    const r = addNumbersToBase(baseId, body.querySelector('#irText').value);
+    sheetClose(); renderBasesList();
+    alert(`${r.added} numéro(s) ajouté(s)` + (r.already ? ` · ${r.already} déjà présent(s)` : '') + (r.blocked ? ` · ${r.blocked} bloqué(s)` : '') + (r.bad ? ` · ${r.bad} ignoré(s) (format)` : ''));
+  });
+}
+function importCalls(baseId){
+  const body = sheetOpen('📞 Journal d\'appels', `
+    <p class="dim">Importe les numéros des personnes qui vous ont appelé (clients, demandeurs d'emploi). Rien n'est ajouté sans votre validation.</p>
+    <label>Période</label><select id="icDays"><option value="30">30 derniers jours</option><option value="90">3 derniers mois</option><option value="365" selected>12 derniers mois</option><option value="0">Tout l'historique</option></select>
+    <label class="check-row"><input type="checkbox" id="icIn" checked> Appels reçus</label>
+    <label class="check-row"><input type="checkbox" id="icMissed" checked> Appels manqués</label>
+    <label class="check-row"><input type="checkbox" id="icOut"> Appels émis (numéros que j'ai appelés)</label>
+    <button type="button" class="btn btn-primary" id="icGo" style="margin-top:10px;">Lire le journal d'appels</button>`);
+  body.querySelector('#icGo').addEventListener('click', () => {
+    const kinds = [['icIn', 'in'], ['icMissed', 'missed'], ['icOut', 'out']].filter(x => body.querySelector('#' + x[0]).checked).map(x => x[1]).join(',');
+    if(!kinds){ alert("Cochez au moins un type d'appel."); return; }
+    const days = parseInt(body.querySelector('#icDays').value) || 0;
+    nativeRead(() => ShamanNative.getCallLog(days, kinds), res => importReview(baseId, '📞 Journal d\'appels', res.items.map(i => ({ raw: i.n, label: (i.name ? i.name + ' · ' : '') + i.c + ' appel(s)' }))));
+  });
+}
+function importContacts(baseId){
+  nativeRead(() => ShamanNative.getContacts(), res => importReview(baseId, '👥 Contacts du téléphone', res.items.map(i => ({ raw: i.n, label: i.name }))));
+}
+function importInbox(baseId){
+  const cfg = qrCfgGet();
+  const body = sheetOpen('💬 SMS reçus', `
+    <p class="dim">Importe les numéros de ceux qui vous ont écrit par SMS. Avec le QR d'inscription, chaque inscrit(e) vous écrit lui-même : c'est la méthode avec accord.</p>
+    <label>Période</label><select id="ibDays"><option value="30">30 derniers jours</option><option value="90">3 derniers mois</option><option value="365" selected>12 derniers mois</option><option value="0">Tout l'historique</option></select>
+    <label class="check-row"><input type="checkbox" id="ibOnly" checked> Seulement les inscriptions (messages contenant le mot-clé)</label>
+    <label>Mot-clé</label><input id="ibKw" value="${escapeHtml(cfg.kw)}">
+    <button type="button" class="btn btn-primary" id="ibGo" style="margin-top:10px;">Lire les SMS reçus</button>`);
+  body.querySelector('#ibGo').addEventListener('click', () => {
+    const days = parseInt(body.querySelector('#ibDays').value) || 0, only = body.querySelector('#ibOnly').checked, kw = body.querySelector('#ibKw').value.trim().toUpperCase();
+    nativeRead(() => ShamanNative.getInbox(days), res => {
+      const items = [];
+      res.items.forEach(m => { if(only && kw && !(m.b || '').toUpperCase().includes(kw)) return; items.push({ raw: m.a, label: (m.b || '').slice(0, 90) }); });
+      importReview(baseId, '💬 SMS reçus', items);
+    });
+  });
+}
+function importFile(baseId){
+  const body = sheetOpen('📄 Importer un fichier', `<p class="dim">Fichier texte, CSV ou contacts (.vcf) : l'app trouve tous les numéros, même mélangés à des noms.</p><input type="file" id="ifFile" accept=".txt,.csv,.tsv,.vcf,text/plain,text/csv,text/vcard,text/x-vcard">`);
+  body.querySelector('#ifFile').addEventListener('change', e => {
+    const f = e.target.files[0]; if(!f) return;
+    const rd = new FileReader();
+    rd.onload = () => importReview(baseId, '📄 ' + f.name, extractNumbers(String(rd.result)).map(raw => ({ raw })));
+    rd.readAsText(f);
+  });
+}
+function importPaste(baseId){
+  const body = sheetOpen('✨ Coller un texte', `<p class="dim">Collez n'importe quel texte (liste désordonnée, discussion, notes…) : l'app en extrait les numéros.</p><textarea id="ipText" style="min-height:220px;" placeholder="Collez ici…"></textarea><button type="button" class="btn btn-primary" id="ipGo" style="margin-top:10px;">Extraire les numéros</button>`);
+  body.querySelector('#ipGo').addEventListener('click', () => importReview(baseId, '✨ Texte collé', extractNumbers(body.querySelector('#ipText').value).map(raw => ({ raw }))));
+}
+function importScan(baseId){
+  const b = baseById(baseId);
+  const tabBtn = document.querySelector('[data-tab="scanner"]'); if(tabBtn) tabBtn.click();
+  setTimeout(() => {
+    const d = document.getElementById('scanDest'); if(d){ d.value = 'base'; d.dispatchEvent(new Event('change')); }
+    const sel = document.getElementById('scanBaseSelect'); if(sel) sel.value = baseId;
+    alert("Scanner prêt : photographiez vos fiches, touchez « Analyser », vérifiez les numéros, puis enregistrez-les" + (b ? " dans « " + b.name + " »" : '') + ". Pour l'écriture manuscrite, configurez une clé Groq gratuite (rubrique « Reconnaissance avancée »).");
+  }, 200);
+}
+function importClean(baseId){
+  const b = baseById(baseId); if(!b) return;
+  if(rbAwait || simAllRunning){ alert('Un envoi est en cours : nettoyez la base après.'); return; }
+  const cats = { dup: 0, fixe: 0, ancien: 0, invalide: 0, etranger: 0, ok: 0 }, seen = new Set(), kindOf = [];
+  b.numbers.forEach(n => {
+    const r = normCI(n); let k;
+    if(!r) k = 'invalide'; else if(r.kind === 'mobile'){ k = seen.has(r.num) ? 'dup' : 'ok'; seen.add(r.num); } else k = r.kind;
+    kindOf.push(k); cats[k]++;
+  });
+  const row = (id, label, n, checked) => `<label class="check-row"><input type="checkbox" id="${id}" ${checked ? 'checked' : ''} ${n ? '' : 'disabled'}> ${label} : <b>${n}</b></label>`;
+  const body = sheetOpen('🧹 Vérifier la base', `
+    <div style="font-size:14px;line-height:1.5;">« ${escapeHtml(b.name)} » : <b>${b.numbers.length}</b> numéros, dont <b>${cats.ok}</b> valides.</div>
+    <p class="dim">Retirer ce qui ne peut pas recevoir de SMS évite des échecs et du temps perdu. Vos autres numéros ne sont pas touchés.</p>
+    ${row('cDup', 'Doublons', cats.dup, true)}${row('cInv', 'Format invalide', cats.invalide, true)}${row('cFixe', 'Lignes fixes (21, 25, 27…)', cats.fixe, true)}
+    ${row('cAnc', 'Anciens numéros à 8 chiffres (à corriger à la main avant de les retirer)', cats.ancien, false)}${row('cEtr', 'Numéros étrangers', cats.etranger, false)}
+    <button type="button" class="btn btn-primary" id="cGo" style="margin-top:10px;">🧹 Nettoyer</button>`);
+  body.querySelector('#cGo').addEventListener('click', () => {
+    const drop = { dup: body.querySelector('#cDup').checked, invalide: body.querySelector('#cInv').checked, fixe: body.querySelector('#cFixe').checked, ancien: body.querySelector('#cAnc').checked, etranger: body.querySelector('#cEtr').checked };
+    const kept = []; let newCursor = 0;
+    b.numbers.forEach((n, i) => { const keep = !drop[kindOf[i]]; if(keep){ kept.push(n); if(i < b.cursor) newCursor++; } });
+    const removed = b.numbers.length - kept.length;
+    if(!removed){ alert('Rien à retirer.'); return; }
+    if(!confirm(`Retirer ${removed} numéro(s) de « ${b.name} » ?`)) return;
+    b.numbers = kept; b.cursor = newCursor; delete b.pendingBatch; b.updatedAt = Date.now();
+    saveDB(); sheetClose(); renderBasesList(); refreshBaseSendSelect();
+    alert(removed + ' numéro(s) retiré(s). Il reste ' + kept.length + ' numéros.');
+  });
+}
+function importQr(){ const c = document.getElementById('qrRegCard'); if(c) c.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+
+/* ---- QR d'inscription (opt-in) : la personne vous écrit elle-même ---- */
+const QR_CFG_KEY = 'shaman_qr_cfg';
+function qrCfgGet(){
+  const d = { num: '', kw: 'INSCRIPTION', msg: '', type: 'sms', title: "Demandeurs d'emploi : inscrivez-vous !", sub: 'Agence de recrutement et de placement' };
+  try{ return Object.assign(d, JSON.parse(localStorage.getItem(QR_CFG_KEY) || '{}')); }catch(e){ return d; }
+}
+function qrCfgSet(p){ try{ localStorage.setItem(QR_CFG_KEY, JSON.stringify(Object.assign(qrCfgGet(), p))); }catch(e){} }
+function qrDefaultMsg(kw){ return kw + " - Nom: ____ Metier: ____ Quartier: ____ . J'accepte de recevoir des offres d'emploi par SMS (STOP pour arreter)"; }
+function qrContent(cfg){
+  const r = normCI(cfg.num), num = r && r.num ? r.num : String(cfg.num).replace(/[^\d+]/g, '');
+  const msg = cfg.msg && cfg.msg.trim() ? cfg.msg.trim() : qrDefaultMsg(cfg.kw);
+  return cfg.type === 'wa' ? `https://wa.me/${num.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}` : `sms:${num}?body=${encodeURIComponent(msg)}`;
+}
+function qrPoster(cfg){
+  const qc = document.createElement('canvas'); QRGen.draw(qc, qrContent(cfg), 640);
+  const W = 900, H = 1200, c = document.createElement('canvas'); c.width = W; c.height = H;
+  const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, W, H); g.fillStyle = '#d6336c'; g.fillRect(0, 0, W, 24); g.fillRect(0, H - 24, W, 24);
+  g.textAlign = 'center';
+  const wrap = (t, y, size, weight, color) => {
+    g.font = `${weight} ${size}px sans-serif`; g.fillStyle = color; let line = '';
+    String(t).split(' ').forEach(w => { const test = line ? line + ' ' + w : w; if(g.measureText(test).width > W - 120 && line){ g.fillText(line, W / 2, y); y += size * 1.25; line = w; } else line = test; });
+    g.fillText(line, W / 2, y); return y + size * 1.25;
+  };
+  let y = 110; y = wrap(cfg.title, y, 52, '700', '#14263a'); y = wrap(cfg.sub, y + 4, 32, '400', '#4a6176');
+  g.imageSmoothingEnabled = false; g.drawImage(qc, (W - 640) / 2, y + 30, 640, 640); y += 30 + 640 + 70;
+  y = wrap('Scannez le QR code, envoyez le message pré-écrit et recevez nos offres.', y, 30, '400', '#14263a');
+  const r = normCI(cfg.num);
+  wrap(cfg.type === 'wa' ? 'Inscription par WhatsApp' : 'Inscription par SMS au ' + (r && r.num ? r.num : cfg.num), y + 10, 26, '700', '#d6336c');
+  return c;
+}
+async function qrShare(canvas){
+  if(NATIVE){
+    try{
+      const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+      ShamanNative.shareBegin(); ShamanNative.shareFileStart('affiche-inscription.png', 'image/png');
+      const CH = 384 * 1024;
+      for(let o = 0; o < blob.size; o += CH){
+        const buf = new Uint8Array(await blob.slice(o, o + CH).arrayBuffer()); let bin = '';
+        for(let k = 0; k < buf.length; k += 8192) bin += String.fromCharCode.apply(null, buf.subarray(k, k + 8192));
+        ShamanNative.shareFileChunk(btoa(bin));
+      }
+      ShamanNative.shareFileEnd(); ShamanNative.shareSend("Inscrivez-vous en scannant ce QR code.");
+    }catch(e){ alert('Partage impossible : ' + e); }
+    return;
+  }
+  const a = document.createElement('a'); a.href = canvas.toDataURL('image/png'); a.download = 'affiche-inscription.png'; document.body.appendChild(a); a.click(); a.remove();
+}
+function initQrCard(){
+  const tab = document.getElementById('tab-bases');
+  if(!tab || document.getElementById('qrRegCard')) return;
+  const cfg = qrCfgGet();
+  const c = document.createElement('div'); c.className = 'card'; c.id = 'qrRegCard';
+  c.innerHTML = `<h2>📲 QR d'inscription (avec accord)</h2>
+    <p class="dim">Affichez ce QR sur une affiche, une vitrine ou vos réseaux : la personne le scanne, un message pré-écrit s'ouvre, elle l'envoie… et vous recevez son numéro avec son accord. Ensuite : « + Ajouter des numéros → 💬 SMS reçus » (Android).</p>
+    <label>Numéro qui reçoit les inscriptions</label><input type="tel" inputmode="tel" id="qrNum" value="${escapeHtml(cfg.num)}" placeholder="0748935686">
+    <label>Mot-clé de reconnaissance</label><input type="text" id="qrKw" value="${escapeHtml(cfg.kw)}">
+    <label>Message pré-écrit (court : le QR contient tout le texte)</label><textarea id="qrMsg" style="min-height:90px;" placeholder="${escapeHtml(qrDefaultMsg(cfg.kw))}">${escapeHtml(cfg.msg)}</textarea>
+    <label>Type d'inscription</label><select id="qrType"><option value="sms" ${cfg.type === 'sms' ? 'selected' : ''}>SMS</option><option value="wa" ${cfg.type === 'wa' ? 'selected' : ''}>WhatsApp</option></select>
+    <label>Titre de l'affiche</label><input type="text" id="qrTitle" value="${escapeHtml(cfg.title)}">
+    <label>Sous-titre</label><input type="text" id="qrSub" value="${escapeHtml(cfg.sub)}">
+    <button type="button" class="btn btn-primary" id="qrGen" style="margin-top:10px;">Générer l'affiche</button>
+    <div id="qrOut" style="margin-top:12px;text-align:center;"></div>`;
+  tab.appendChild(c);
+  c.querySelector('#qrGen').addEventListener('click', () => {
+    const p = { num: c.querySelector('#qrNum').value.trim(), kw: c.querySelector('#qrKw').value.trim() || 'INSCRIPTION', msg: c.querySelector('#qrMsg').value, type: c.querySelector('#qrType').value, title: c.querySelector('#qrTitle').value.trim(), sub: c.querySelector('#qrSub').value.trim() };
+    if(!p.num){ alert('Indiquez le numéro qui reçoit les inscriptions.'); return; }
+    qrCfgSet(p);
+    const out = c.querySelector('#qrOut');
+    try{
+      const poster = qrPoster(p); poster.style.cssText = 'width:100%;max-width:360px;border:1px solid #cfe3f0;border-radius:10px;';
+      out.innerHTML = ''; out.appendChild(poster);
+      const row = document.createElement('div'); row.className = 'row'; row.style.cssText = 'gap:8px;margin-top:10px;';
+      row.innerHTML = `<button type="button" class="btn btn-primary btn-small" id="qrSend" style="flex:1 1 0;">${NATIVE ? '📤 Partager l\'affiche' : '⬇️ Enregistrer l\'image'}</button>`;
+      out.appendChild(row); row.querySelector('#qrSend').addEventListener('click', () => qrShare(poster));
+    }catch(e){ out.innerHTML = '<div style="color:#c43e3e;font-weight:700;">Message trop long pour le QR code : raccourcissez-le.</div>'; }
+  });
+}
+if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initQrCard); else initQrCard();
+function cleanNum(n){
+ return String(n).replace(/\s+/g, ''); }
 // Branche un bouton « envoi automatique » : progression + fin.
 function nativeRun(btn, statusEl, numbers, body, onDone){
   btn.disabled = true;
@@ -3368,9 +3727,24 @@ function renderBasesList(){
       </div>
       <div id="base-view-${b.id}" style="display:none;margin-top:10px;"></div>
       <div id="base-add-${b.id}" style="display:none;margin-top:10px;">
+        <div style="font-weight:700;margin-bottom:4px;">⚡ Saisie rapide (fiches papier)</div>
+        <input type="text" inputmode="tel" autocomplete="off" maxlength="16" data-quick-add="${b.id}" placeholder="Tapez les 10 chiffres : ajout automatique" style="font-size:18px;letter-spacing:1px;">
+        <div id="base-quick-msg-${b.id}" style="font-size:13px;font-weight:700;margin:6px 0 12px;min-height:18px;"></div>
+        <div style="font-weight:700;margin-bottom:4px;">Ou collez une liste</div>
         <textarea id="base-add-text-${b.id}" inputmode="tel" style="min-height:80px;" placeholder="Un numéro par ligne, ou collez une liste…"></textarea>
         <div style="height:8px"></div>
         <button class="btn btn-primary btn-small" data-confirm-add="${b.id}">Ajouter à la base</button>
+        <div style="font-weight:700;margin:18px 0 6px;">➕ Plus de moyens d'ajouter</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;">
+          ${NATIVE ? `<button class="btn btn-secondary btn-small" data-imp="calls" data-base="${b.id}" style="flex:1 1 45%;">📞 Journal d'appels</button>
+          <button class="btn btn-secondary btn-small" data-imp="contacts" data-base="${b.id}" style="flex:1 1 45%;">👥 Contacts du téléphone</button>
+          <button class="btn btn-secondary btn-small" data-imp="inbox" data-base="${b.id}" style="flex:1 1 45%;">💬 SMS reçus / inscriptions</button>` : ''}
+          <button class="btn btn-secondary btn-small" data-imp="scan" data-base="${b.id}" style="flex:1 1 45%;">📷 Scanner des fiches</button>
+          <button class="btn btn-secondary btn-small" data-imp="file" data-base="${b.id}" style="flex:1 1 45%;">📄 Fichier (.txt .csv .vcf)</button>
+          <button class="btn btn-secondary btn-small" data-imp="paste" data-base="${b.id}" style="flex:1 1 45%;">✨ Coller un texte</button>
+          <button class="btn btn-secondary btn-small" data-imp="clean" data-base="${b.id}" style="flex:1 1 45%;">🧹 Vérifier / nettoyer</button>
+          <button class="btn btn-secondary btn-small" data-imp="qr" data-base="${b.id}" style="flex:1 1 45%;">📲 QR d'inscription</button>
+        </div>
       </div>
     </div>`;
   }).join('');
@@ -3423,6 +3797,38 @@ function renderBasesList(){
       panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
     });
   });
+  el.querySelectorAll('[data-quick-add]').forEach(inp => {
+    const baseId = inp.dataset.quickAdd;
+    const msg = document.getElementById('base-quick-msg-' + baseId);
+    let added = 0;
+    const say = (t, good) => { msg.textContent = t; msg.style.color = good === false ? '#c43e3e' : good ? '#1f8a4c' : ''; };
+    const tryAdd = force => {
+      const b = db.phoneBases.find(x => x.id === baseId); if(!b) return;
+      const d = inp.value.replace(/\D/g, '');
+      if(!d.length) return;
+      const dial = b.defaultDial || '225';
+      const auto = dial === '225' && ((d.length === 10 && d[0] === '0') || (d.length === 13 && d.startsWith('225')));
+      if(!auto && !force){ return; }
+      if(!auto && dial === '225'){ say('⚠️ Numéro incomplet : ' + d.length + ' chiffres (10 attendus, ex. 0748935686).', false); return; }
+      const parsed = parseNumbersBulk(inp.value, dial);
+      if(parsed.length !== 1){ say('⚠️ Numéro incomplet : ' + d.length + ' chiffres (10 attendus).', false); return; }
+      const num = parsed[0];
+      if(isBlocked(num)){ say('🚫 ' + num + ' est bloqué : refusé.', false); inp.value = ''; if(navigator.vibrate) navigator.vibrate([60, 40, 60]); return; }
+      if(b.numbers.indexOf(num) >= 0){ say('↩️ ' + num + ' est déjà dans la base.', false); inp.value = ''; if(navigator.vibrate) navigator.vibrate([60, 40, 60]); return; }
+      b.numbers.push(num); b.updatedAt = Date.now(); added++;
+      saveDB(); updateBaseMeta(b.id); refreshBaseSendSelect();
+      inp.value = '';
+      say('✅ ' + num + ' ajouté · ' + added + ' cette fois · ' + b.numbers.length + ' dans la base', true);
+      if(navigator.vibrate) navigator.vibrate(25);
+      inp.focus();
+    };
+    inp.addEventListener('input', () => tryAdd(false));
+    inp.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); tryAdd(true); } });
+  });
+  el.querySelectorAll('[data-imp]').forEach(btn => btn.addEventListener('click', () => {
+    const fn = { calls: importCalls, contacts: importContacts, inbox: importInbox, scan: importScan, file: importFile, paste: importPaste, clean: importClean, qr: importQr }[btn.dataset.imp];
+    if(fn) fn(btn.dataset.base);
+  }));
   el.querySelectorAll('[data-confirm-add]').forEach(btn => {
     btn.addEventListener('click', () => {
       if(document.activeElement && typeof document.activeElement.blur === 'function'){
