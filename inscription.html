@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inscription</title>
+<style>
+  :root{ --bg:#EAF5FC; --card:#fff; --ink:#14263a; --dim:#4a6176; --pink:#d6336c; --line:#cfe3f0; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--ink); }
+  .wrap{ max-width:520px; margin:0 auto; padding:18px 14px 40px; }
+  .card{ background:var(--card); border:1px solid var(--line); border-radius:16px; padding:18px; box-shadow:0 4px 18px rgba(20,38,58,.06); }
+  h1{ font-size:22px; margin:0 0 4px; line-height:1.25; }
+  .sub{ color:var(--dim); margin:0 0 16px; }
+  label{ display:block; font-weight:700; margin:14px 0 4px; font-size:14px; }
+  input[type=text]{ width:100%; font-size:17px; padding:12px; border:1.5px solid var(--line); border-radius:12px; background:#f6fbff; color:var(--ink); }
+  input[type=text]:focus{ outline:none; border-color:var(--pink); }
+  .consent{ display:flex; gap:10px; align-items:flex-start; margin:18px 0 6px; font-size:14px; line-height:1.4; }
+  .consent input{ width:22px; height:22px; margin-top:2px; flex:0 0 auto; }
+  .btn{ display:block; width:100%; text-align:center; text-decoration:none; font-size:17px; font-weight:700; color:#fff; background:linear-gradient(135deg,#f0508a,#ff8fbd); border:0; border-radius:14px; padding:15px; margin-top:16px; cursor:pointer; }
+  .btn[aria-disabled=true]{ opacity:.45; pointer-events:none; }
+  .alt{ background:#fff; color:var(--pink); border:2px solid var(--pink); }
+  .note{ font-size:12.5px; color:var(--dim); margin-top:14px; line-height:1.45; }
+  textarea{ width:100%; min-height:90px; font-size:14px; padding:10px; border:1.5px solid var(--line); border-radius:12px; background:#f6fbff; color:var(--ink); }
+  .err{ color:#c43e3e; font-weight:700; }
+  .hide{ display:none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card" id="card">
+    <h1 id="title">Inscription</h1>
+    <p class="sub" id="sub"></p>
+    <div id="fields"></div>
+    <label class="consent" for="ok"><input type="checkbox" id="ok"><span id="consentTxt"></span></label>
+    <a class="btn" id="go" aria-disabled="true" href="#">Envoyer mon inscription</a>
+    <div class="note" id="how"></div>
+    <div id="fallback" class="hide">
+      <p class="note">Si votre messagerie ne s'est pas ouverte, envoyez ce message vous-même au <b id="fbNum"></b> :</p>
+      <textarea id="fbMsg" readonly></textarea>
+      <button class="btn alt" id="copy" type="button">Copier le message</button>
+    </div>
+    <p class="err hide" id="err"></p>
+  </div>
+</div>
+<script>
+(function(){
+  var q = new URLSearchParams(location.search);
+  var raw = (q.get('n') || '').replace(/[^\d+]/g, '');
+  var digits = raw.replace(/\D/g, '');
+  var num = '';
+  if(digits.length === 10 && digits[0] === '0') num = '+225' + digits;
+  else if(digits.length === 13 && digits.indexOf('225') === 0) num = '+' + digits;
+  else if(digits.length >= 9) num = '+' + digits;
+  var kw = (q.get('k') || 'INSCRIPTION').slice(0, 40);
+  var type = q.get('t') === 'wa' ? 'wa' : 'sms';
+  var fields = (q.get('f') || 'Nom,Métier,Quartier').split(',').map(function(x){ return x.trim(); }).filter(Boolean).slice(0, 6);
+  var agency = (q.get('a') || '').slice(0, 60);
+  var title = (q.get('ti') || "Inscrivez-vous").slice(0, 90);
+  var sub = (q.get('su') || '').slice(0, 120);
+  document.title = title;
+  document.getElementById('title').textContent = title;
+  document.getElementById('sub').textContent = sub;
+  var consent = q.get('c') || ("J'accepte de recevoir des offres d'emploi par SMS" + (agency ? ' de ' + agency : '') + ". Je peux écrire STOP pour arrêter.");
+  document.getElementById('consentTxt').textContent = consent;
+  var box = document.getElementById('fields');
+  fields.forEach(function(f, i){
+    var l = document.createElement('label'); l.textContent = f; l.setAttribute('for', 'f' + i);
+    var inp = document.createElement('input'); inp.type = 'text'; inp.id = 'f' + i; inp.autocomplete = 'off'; inp.maxLength = 60;
+    if(/t[ée]l|num/i.test(f)) inp.inputMode = 'tel';
+    box.appendChild(l); box.appendChild(inp);
+  });
+  var go = document.getElementById('go'), ok = document.getElementById('ok');
+  if(!num){ var e = document.getElementById('err'); e.textContent = "Lien d'inscription incomplet : le numéro de réception est manquant."; e.classList.remove('hide'); go.style.display = 'none'; return; }
+  document.getElementById('how').textContent = type === 'wa'
+    ? "En touchant le bouton, WhatsApp s'ouvre avec votre message déjà écrit : il ne vous reste qu'à l'envoyer. Votre numéro nous parvient ainsi avec votre accord."
+    : "En touchant le bouton, votre messagerie SMS s'ouvre avec votre message déjà écrit : il ne vous reste qu'à l'envoyer. Votre numéro nous parvient ainsi avec votre accord.";
+  function message(){
+    var parts = [kw];
+    fields.forEach(function(f, i){ var v = (document.getElementById('f' + i).value || '').replace(/\s+/g, ' ').trim(); if(v) parts.push(f + ': ' + v); });
+    parts.push('Accord SMS: OUI');
+    return parts.join(' - ');
+  }
+  function link(){
+    var m = message();
+    if(type === 'wa') return 'https://wa.me/' + num.replace(/\D/g, '') + '?text=' + encodeURIComponent(m);
+    var sep = /iPhone|iPad|iPod/i.test(navigator.userAgent) ? '&' : '?';
+    return 'sms:' + num + sep + 'body=' + encodeURIComponent(m);
+  }
+  function refresh(){
+    var firstOk = !fields.length || (document.getElementById('f0').value || '').trim().length > 0;
+    var enabled = ok.checked && firstOk;
+    go.setAttribute('aria-disabled', enabled ? 'false' : 'true');
+    go.href = enabled ? link() : '#';
+    document.getElementById('fbMsg').value = message();
+    document.getElementById('fbNum').textContent = num;
+  }
+  box.addEventListener('input', refresh); ok.addEventListener('change', refresh);
+  go.addEventListener('click', function(){ document.getElementById('fallback').classList.remove('hide'); });
+  document.getElementById('copy').addEventListener('click', function(){
+    var t = document.getElementById('fbMsg'); t.select();
+    try{ document.execCommand('copy'); this.textContent = 'Message copié ✔'; }catch(e){}
+  });
+  refresh();
+})();
+</script>
+</body>
+</html>
