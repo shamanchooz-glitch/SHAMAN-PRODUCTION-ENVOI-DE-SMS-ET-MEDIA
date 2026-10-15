@@ -1544,7 +1544,7 @@ smsBody.addEventListener('input', () => {
    Dans l'APK, window.ShamanNative existe : les SMS partent directement,
    sans ouvrir l'appli SMS, avec choix automatique de la SIM. */
 const NATIVE = !!window.ShamanNative;
-const APP_VERSION = '1.16';
+const APP_VERSION = '1.17';
 const nativeCbs = {};
 window.onShamanSms = function(json){
   try{ const e = JSON.parse(json); const cb = nativeCbs[e.id]; if(cb) cb(e); if(e.type === 'done') delete nativeCbs[e.id]; }catch(err){}
@@ -1595,7 +1595,7 @@ function nativeSend(numbers, body, onEvent, bodies, extra){
   const sb = t => S.simplify ? (cache[t] !== undefined ? cache[t] : (cache[t] = smsSimplify(t))) : t;
   const body2 = sb(body || ''), bodies2 = bodies ? bodies.map(sb) : bodies;
   try{ localStorage.setItem('shaman_last_body', (bodies2 && bodies2[0]) || body2 || ''); }catch(e){}
-  const r = ShamanNative.sendSms(JSON.stringify({ id, numbers, body: body2, bodies: bodies2, mode: S.mode, delay: S.delay, serial: !!S.serial, stopAt: (extra && extra.stopAt) || 0 }));
+  const r = ShamanNative.sendSms(JSON.stringify({ id, numbers, body: body2, bodies: bodies2, mode: S.mode, delay: S.delay, serial: !!S.serial, adaptive: S.auto !== false, inflight: 3, stopAt: (extra && extra.stopAt) || 0 }));
   if(r !== 'ok'){ delete nativeCbs[id]; onEvent({ id, type: 'error', message: r }); }
   return id;
 }
@@ -1638,6 +1638,8 @@ function journalLabel(code, extra){
   if(c === 4) return ['❌', 'Pas de réseau'];
   if(c === 5) return ['⛔', "Limite d'envoi d'Android atteinte"];
   if(c === 102) return ['🚫', 'Ignoré : numéro bloqué ou mis de côté'];
+  if(c === 103) return ['⚙️', 'Rythme ajusté automatiquement'];
+  if(c === 6) return ['⚠️', 'Partiel : une partie du message est arrivée, pas de renvoi (évite un doublon)'];
   if(c === 100) return ['▶️', 'Envoi démarré'];
   if(c === 101) return ['⚠️', 'Erreur interne du téléphone']; 
   if(c === -1) return ['❌', 'Erreur du téléphone' + (extra ? ' : ' + extra : '')];
@@ -2209,6 +2211,28 @@ function initQrCard(){
   const c = document.createElement('div'); c.className = 'card'; c.id = 'qrRegCard'; tab.appendChild(c); renderQrCard();
 }
 if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initQrCard); else initQrCard();
+const smsCounterUpdaters = [];
+function smsCounterFor(ta){
+  const el = document.createElement('div'); el.style.cssText = 'font-size:12.5px;margin:4px 0 10px;font-weight:700;';
+  ta.insertAdjacentElement('afterend', el);
+  const upd = () => {
+    const raw = ta.value || '';
+    if(!raw.trim()){ el.textContent = ''; return; }
+    const segs = raw.split(/\n\s*---\s*\n/).filter(x => x.trim());
+    const S = simGet(), simp = NATIVE && S.simplify;
+    let best = null, bestRaw = '';
+    segs.forEach(t => { const e = simp ? smsSimplify(t) : t, a = smsParts(e); if(!best || a.len > best.len){ best = a; bestRaw = t; } });
+    const limit = best.enc === 'GSM-7' ? 160 : 70, over = best.len - limit;
+    let msg = (segs.length > 1 ? 'Message le plus long : ' : '') + `${best.len} caractères (${best.enc}) → ${best.parts} SMS`;
+    if(best.parts === 1){ el.style.color = '#1f8a4c'; msg += ` · il reste ${limit - best.len} caractère(s) avant 2 SMS`; }
+    else { el.style.color = '#c4780a'; if(over > 0 && over <= 40) msg += ` · retirez ${over} caractère(s) pour tenir en 1 SMS (moins d'échecs, moitié moins de crédit)`; }
+    if(NATIVE && !simp){ const b = smsParts(smsSimplify(bestRaw)); if(b.parts < best.parts) msg += ` · avec « Simplifier » : ${b.parts} SMS`; }
+    el.textContent = msg;
+  };
+  ta.addEventListener('input', upd); smsCounterUpdaters.push(upd); upd();
+}
+function initSmsCounters(){ ['smsBody', 'schedBody', 'rbBody', 'baseSmsBody'].forEach(id => { const ta = document.getElementById(id); if(ta && !ta.dataset.counter){ ta.dataset.counter = '1'; smsCounterFor(ta); } }); }
+if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initSmsCounters); else initSmsCounters();
 function cleanNum(n){
  return String(n).replace(/\s+/g, ''); }
 // Branche un bouton « envoi automatique » : progression + fin.
@@ -2328,8 +2352,10 @@ function renderSimPickers(){
       <label>Numéro de la SIM 1</label><input type="tel" inputmode="tel" data-sim-num="sim1" value="${escapeHtml(S.sim1)}">
       <label>Numéro de la SIM 2</label><input type="tel" inputmode="tel" data-sim-num="sim2" value="${escapeHtml(S.sim2)}">
       ${NATIVE ? `<div style="font-size:12.5px;margin-top:8px;">${nativeSims().map(x => '📶 SIM ' + (x.slot + 1) + ' : ' + escapeHtml(x.name || '') + (x.number ? ' · ' + escapeHtml(x.number) : '')).join('<br>') || '⚠️ Aucune SIM détectée (autorisez « Téléphone » pour l\'app).'}</div>
+      ${(() => { const ss = nativeSims(); return ss.length === 2 && ss[0].name && ss[0].name === ss[1].name ? `<div style="font-size:12.5px;margin-top:6px;">ℹ️ Vos deux SIM sont chez le même opérateur (${escapeHtml(ss[0].name)}) : si l'opérateur limite le rythme, il le limite sur les deux.</div>` : ''; })()}
       <div style="font-size:12px;color:var(--text-dim);margin-top:6px;">📦 Version de l'application : ${APP_VERSION}</div>
       <label class="check-row" style="margin-top:10px;"><input type="checkbox" data-sim-keep ${S.keep !== false ? 'checked' : ''}> 🔋 Garder l'app active en arrière-plan (les envois continuent écran éteint, pendant un appel ou dans une autre appli)</label>
+      <label class="check-row" style="margin-top:10px;"><input type="checkbox" data-sim-auto ${S.auto !== false ? 'checked' : ''}> ⚙️ Rythme automatique : ralentit tout seul quand il y a trop d'échecs lents, puis réaccélère (recommandé)</label>
       <label class="check-row" style="margin-top:10px;"><input type="checkbox" data-sim-serial ${S.serial ? 'checked' : ''}> 🐢 Mode prudent : un seul SMS à la fois sur tout le téléphone (plus lent ; à essayer si trop d'échecs)</label>
       <label class="check-row" style="margin-top:10px;"><input type="checkbox" data-sim-simplify ${S.simplify ? 'checked' : ''}> ✂️ Simplifier les messages (retire ê î ô â û ç, emojis et guillemets spéciaux) : moins de SMS facturés par personne</label>
       <div style="font-size:12px;color:var(--text-dim);">${escapeHtml((() => { try{ return smsPartsText(localStorage.getItem('shaman_last_body') || ''); }catch(e){ return ''; } })())}</div>
@@ -2351,8 +2377,9 @@ function renderSimPickers(){
     const stp = el.querySelector('[data-sim-stop]'); if(stp) stp.addEventListener('click', () => { simAllStop = true; setSimAllMsg('⛔ Arrêt demandé…'); try{ ShamanNative.cancel(); }catch(e){} setTimeout(() => { if(simAllRunning) simAllFinish('⛔ Envoi arrêté.'); }, 4000); });
     const all = el.querySelector('[data-sim-all]'); if(all) all.addEventListener('click', () => { if(el.dataset.ctx === 'base') baseAutoAll(); else smsAutoAll(); });
     const kp = el.querySelector('[data-sim-keep]'); if(kp) kp.addEventListener('change', () => { simSet({ keep: kp.checked }); try{ ShamanNative.setKeepAlive(kp.checked); }catch(e){} renderSimPickers(); });
+    const au = el.querySelector('[data-sim-auto]'); if(au) au.addEventListener('change', () => { simSet({ auto: au.checked }); renderSimPickers(); });
     const se = el.querySelector('[data-sim-serial]'); if(se) se.addEventListener('change', () => { simSet({ serial: se.checked }); renderSimPickers(); });
-    const sp = el.querySelector('[data-sim-simplify]'); if(sp) sp.addEventListener('change', () => { simSet({ simplify: sp.checked }); renderSimPickers(); });
+    const sp = el.querySelector('[data-sim-simplify]'); if(sp) sp.addEventListener('change', () => { simSet({ simplify: sp.checked }); renderSimPickers(); smsCounterUpdaters.forEach(f => f()); });
     const bt = el.querySelector('[data-sim-battery]'); if(bt) bt.addEventListener('click', () => { try{ ShamanNative.requestBatteryExemption(); }catch(e){} setTimeout(renderSimPickers, 1500); });
     const dl = el.querySelector('[data-sim-delay]');
     if(dl) dl.addEventListener('input', () => simSet({ delay: Math.max(0, parseInt(dl.value) || 0) }));
@@ -3499,7 +3526,7 @@ function rbDrain(it, manual){
   if(!nums.length){ rbEnd(d, { type: 'done', sent: 0, failed: 0, total: 0 }); return; }
   rbSetLive(`⏳ Robot : démarrage — ${nums.length} destinataires en ${lots.length} lot(s) · ${smsParts(msg).parts} SMS facturé(s) chacun…`);
   const stopAt = manual ? 0 : rbQuietStopAt();
-  const res = ShamanNative.sendSms(JSON.stringify({ id: nid, numbers: nums, body: '', bodies, mode: simGet().mode, delay: simGet().delay, serial: !!simGet().serial, stopAt }));
+  const res = ShamanNative.sendSms(JSON.stringify({ id: nid, numbers: nums, body: '', bodies, mode: simGet().mode, delay: simGet().delay, serial: !!simGet().serial, adaptive: simGet().auto !== false, inflight: 3, stopAt }));
   if(res !== 'ok'){ rbOnEvent(d)({ type: 'error', message: res }); return; }
   // Garde-fou : si le téléphone ne répond pas dans les 25 s, on le dit au lieu de rester bloqué sur « démarrage ».
   setTimeout(() => {
