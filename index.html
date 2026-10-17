@@ -1544,7 +1544,7 @@ smsBody.addEventListener('input', () => {
    Dans l'APK, window.ShamanNative existe : les SMS partent directement,
    sans ouvrir l'appli SMS, avec choix automatique de la SIM. */
 const NATIVE = !!window.ShamanNative;
-const APP_VERSION = '1.17';
+const APP_VERSION = '1.18';
 const nativeCbs = {};
 window.onShamanSms = function(json){
   try{ const e = JSON.parse(json); const cb = nativeCbs[e.id]; if(cb) cb(e); if(e.type === 'done') delete nativeCbs[e.id]; }catch(err){}
@@ -1766,8 +1766,8 @@ function initJournalUi(){
 if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initJournalUi); else initJournalUi();
 /* ================= QR CODE (généré dans l'app, sans internet) ================= */
 const QRGen = (function(){
-  const ECC = [-1,10,16,26,18,24,16,18,22,22,26,30,22,22,24,24,28,28,26,26,26];   // octets de correction par bloc, niveau M, versions 1 à 20
-  const NBLK = [-1,1,1,1,2,2,4,4,4,5,5,5,8,9,9,10,10,11,13,14,16];   // nombre de blocs, niveau M
+  const ECC = [-1,10,16,26,18,24,16,18,22,22,26,30,22,22,24,24,28,28,26,26,26,26,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28];   // octets de correction par bloc, niveau M, versions 1 à 40
+  const NBLK = [-1,1,1,1,2,2,4,4,4,5,5,5,8,9,9,10,10,11,13,14,16,17,17,18,20,21,23,25,26,28,29,31,33,35,37,38,40,43,45,47,49];   // nombre de blocs, niveau M
   function numRaw(v){ let r = (16*v + 128)*v + 64; if(v >= 2){ const na = Math.floor(v/7) + 2; r -= (25*na - 10)*na - 55; if(v >= 7) r -= 36; } return r; }
   function numData(v){ return Math.floor(numRaw(v)/8) - ECC[v]*NBLK[v]; }
   function mul(x, y){ let z = 0; for(let i = 7; i >= 0; i--){ z = (z << 1) ^ ((z >>> 7) * 0x11D); z ^= ((y >>> i) & 1) * x; } return z; }
@@ -1787,8 +1787,8 @@ const QRGen = (function(){
   function make(text){
     const bytes = Array.from(new TextEncoder().encode(text));
     let ver = 1;
-    for(; ver <= 20; ver++){ const cap = numData(ver) * 8; const need = 4 + (ver < 10 ? 8 : 16) + 8 * bytes.length; if(need <= cap) break; }
-    if(ver > 20) throw new Error('Texte trop long pour le QR code');
+    for(; ver <= 30; ver++){ const cap = numData(ver) * 8; const need = 4 + (ver < 10 ? 8 : 16) + 8 * bytes.length; if(need <= cap) break; }
+    if(ver > 30) throw new Error('Texte trop long pour le QR code');
     const bits = [];
     const put = (val, len) => { for(let i = len - 1; i >= 0; i--) bits.push((val >>> i) & 1); };
     put(4, 4); put(bytes.length, ver < 10 ? 8 : 16); bytes.forEach(b => put(b, 8));
@@ -1991,7 +1991,13 @@ function importInbox(baseId){
     const words = body.querySelector('#ibKw').value.split(',').map(x => x.trim().toUpperCase()).filter(Boolean);
     nativeRead(() => ShamanNative.getInbox(days), res => {
       const items = [];
-      res.items.forEach(m => { const t = (m.b || '').toUpperCase(); if(only && words.length && !words.some(w => t.includes(w))) return; items.push({ raw: m.a, label: (m.b || '').slice(0, 90) }); });
+      let reg = 0;
+      res.items.forEach(m => {
+        const t = (m.b || '').toUpperCase(); if(only && words.length && !words.some(w => t.includes(w))) return;
+        items.push({ raw: m.a, label: (m.b || '').replace(/\s+/g, ' ').slice(0, 90) });
+        if(only){ const ph = normCI(m.a); if(ph && ph.num && regAdd({ id: 's:' + m.a + ':' + m.d, ts: (m.d || 0) * 1000 || Date.now(), src: 'sms', camp: regCampOf(m.b), phone: ph.num, f: regParseBody(m.b) })) reg++; }
+      });
+      if(reg) alert(reg + ' inscription(s) ajoutée(s) au registre (Bases → carte « Inscription avec accord »).');
       importReview(baseId, '💬 SMS reçus', items);
     });
   });
@@ -2074,8 +2080,8 @@ function importClean(baseId){
 }
 function importQr(){ const c = document.getElementById('qrRegCard'); if(c) c.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
 
-/* ---- QR d'inscription (avec accord) : plusieurs QR, lien cliquable et page d'inscription ---- */
-const QR_LIST_KEY = 'shaman_qr_list', QR_SITE_KEY = 'shaman_site_url';
+/* ---- Inscription avec accord : QR hors ligne (SMS complet), formulaire en ligne chiffré, registre ---- */
+const QR_LIST_KEY = 'shaman_qr_list', QR_SITE_KEY = 'shaman_site_url', REG_KEY = 'shaman_reg', ECDH_KEY = 'shaman_ecdh', INSC_PATH = 'sms-app/inscriptions';
 function qrListGet(){ try{ const a = JSON.parse(localStorage.getItem(QR_LIST_KEY) || '[]'); return Array.isArray(a) ? a : []; }catch(e){ return []; } }
 function qrListSet(a){ try{ localStorage.setItem(QR_LIST_KEY, JSON.stringify(a)); }catch(e){} }
 function qrSiteGet(){
@@ -2085,35 +2091,48 @@ function qrSiteGet(){
 }
 function qrSiteNorm(u){ u = String(u || '').trim(); if(!u) return ''; if(!/^https?:\/\//i.test(u)) u = 'https://' + u; u = u.replace(/inscription\.html.*$/i, '').replace(/index\.html.*$/i, ''); if(!u.endsWith('/')) u += '/'; return u; }
 function qrKwFrom(name){ const slug = String(name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 20); return slug ? 'INSCRIPTION-' + slug : 'INSCRIPTION'; }
-function qrDirectMsg(c){ return c.kw + ' - ' + String(c.fields || 'Nom,Métier,Quartier').split(',').map(f => f.trim() + ': ____').join(' - ') + ' - Accord SMS: OUI'; }
-function qrFormLink(c){
-  const site = qrSiteGet(); if(!site) return '';
-  const q = new URLSearchParams(); const r = normCI(c.num);
-  q.set('n', r && r.num ? r.num : c.num); q.set('k', c.kw); q.set('t', c.type);
-  if(c.fields) q.set('f', c.fields); if(c.title) q.set('ti', c.title); if(c.sub) q.set('su', c.sub); if(c.agency) q.set('a', c.agency);
-  return site + 'inscription.html?' + q.toString();
-}
+function qrFieldList(c){ return String(c.fields || 'Nom,Métier,Quartier').split(',').map(x => x.trim()).filter(Boolean); }
+function qrModeOf(c){ return c.mode === 'form' ? 'form' : c.mode === 'both' ? 'both' : 'sms'; }   // l'ancien « direct » devient « sms »
+// Le SMS COMPLET : tous les champs d'un coup, un par ligne (la personne n'a qu'à compléter après chaque « : »)
+function qrSmsBody(c){ return [c.kw].concat(qrFieldList(c).map(f => f + ': ')).concat(['Accord SMS: OUI']).join('\n'); }
+function qrNumOf(c){ const r = normCI(c.num); return r && r.num ? r.num : String(c.num).replace(/[^\d+]/g, ''); }
 function qrDirectLink(c){
-  const r = normCI(c.num), num = r && r.num ? r.num : String(c.num).replace(/[^\d+]/g, ''), msg = qrDirectMsg(c);
+  const num = qrNumOf(c), msg = qrSmsBody(c);
   return c.type === 'wa' ? `https://wa.me/${num.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}` : `sms:${num}?body=${encodeURIComponent(msg)}`;
 }
-// Lien que la personne peut toucher (formulaire en ligne si le site est configuré, sinon message direct)
-function qrShareLink(c){ return (c.mode !== 'direct' && qrFormLink(c)) || qrDirectLink(c); }
-function qrContent(c){ return qrShareLink(c); }
+function qrFormLink(c){
+  const site = qrSiteGet(); if(!site) return '';
+  const q = new URLSearchParams();
+  q.set('n', qrNumOf(c)); q.set('k', c.kw); q.set('t', c.type);
+  if(c.fields) q.set('f', c.fields); if(c.title) q.set('ti', c.title); if(c.sub) q.set('su', c.sub); if(c.agency) q.set('a', c.agency);
+  if(c.pk && c.token){ q.set('pk', c.pk); q.set('w', c.token); }
+  return site + 'inscription.html?' + q.toString();
+}
+// Les QR de l'affiche : sans internet (SMS complet) et/ou formulaire en ligne
+function qrItems(c){
+  const m = qrModeOf(c), items = [], form = qrFormLink(c);
+  if(m === 'sms' || m === 'both' || !form) items.push({ key: 'sms', label: c.type === 'wa' ? 'Par WhatsApp' : '📴 SANS INTERNET : scannez, complétez et envoyez le SMS', url: qrDirectLink(c) });
+  if((m === 'form' || m === 'both') && form) items.push({ key: 'form', label: '🌐 PAR INTERNET : formulaire (aussi sans crédit SMS)', url: form });
+  return items;
+}
 function qrPoster(c){
-  const qc = document.createElement('canvas'); QRGen.draw(qc, qrContent(c), 640);
-  const W = 900, H = 1200, cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const items = qrItems(c), size = items.length > 1 ? 520 : 640, W = 900, H = items.length > 1 ? 1900 : 1200;
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
   const g = cv.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, W, H); g.fillStyle = '#d6336c'; g.fillRect(0, 0, W, 24); g.fillRect(0, H - 24, W, 24);
   g.textAlign = 'center';
-  const wrap = (t, y, size, weight, color) => {
-    g.font = `${weight} ${size}px sans-serif`; g.fillStyle = color; let line = '';
-    String(t).split(' ').forEach(w => { const test = line ? line + ' ' + w : w; if(g.measureText(test).width > W - 120 && line){ g.fillText(line, W / 2, y); y += size * 1.25; line = w; } else line = test; });
-    g.fillText(line, W / 2, y); return y + size * 1.25;
+  const wrap = (t, y, sz, weight, color) => {
+    g.font = `${weight} ${sz}px sans-serif`; g.fillStyle = color; let line = '';
+    String(t).split(' ').forEach(w => { const test = line ? line + ' ' + w : w; if(g.measureText(test).width > W - 120 && line){ g.fillText(line, W / 2, y); y += sz * 1.25; line = w; } else line = test; });
+    g.fillText(line, W / 2, y); return y + sz * 1.25;
   };
-  let y = 110; y = wrap(c.title, y, 52, '700', '#14263a'); y = wrap(c.sub, y + 4, 32, '400', '#4a6176');
-  g.imageSmoothingEnabled = false; g.drawImage(qc, (W - 640) / 2, y + 30, 640, 640); y += 30 + 640 + 70;
-  y = wrap('Scannez le QR code, remplissez vos informations et envoyez : vous recevrez nos offres.', y, 30, '400', '#14263a');
-  if(c.agency) wrap(c.agency, y + 10, 28, '700', '#d6336c');
+  let y = 110; y = wrap(c.title, y, 52, '700', '#14263a'); y = wrap(c.sub, y + 4, 32, '400', '#4a6176'); y += 14;
+  items.forEach(it => {
+    const qc = document.createElement('canvas'); QRGen.draw(qc, it.url, size);
+    y = wrap(it.label, y + 6, 30, '700', '#d6336c');
+    g.imageSmoothingEnabled = false; g.drawImage(qc, (W - size) / 2, y + 6, size, size); y += size + 50;
+  });
+  y = wrap('Vos informations arrivent chez nous avec votre accord pour recevoir nos offres.', y, 28, '400', '#14263a');
+  if(c.agency) wrap(c.agency, y + 6, 28, '700', '#d6336c');
   return cv;
 }
 async function qrShareImage(canvas){
@@ -2133,74 +2152,220 @@ async function qrShareImage(canvas){
   }
   const a = document.createElement('a'); a.href = canvas.toDataURL('image/png'); a.download = 'affiche-inscription.png'; document.body.appendChild(a); a.click(); a.remove();
 }
-function qrShareLinkText(c){
-  const link = qrShareLink(c), txt = (c.title ? c.title + ' — ' : '') + 'inscrivez-vous ici : ' + link;
+function shareTextNow(txt){
   if(NATIVE){ try{ ShamanNative.shareText(txt); return; }catch(e){} }
   if(navigator.share){ navigator.share({ text: txt }).catch(() => {}); return; }
-  copyToClipboard(txt, null);
-  alert('Lien copié : collez-le dans WhatsApp, Facebook, un SMS…');
+  copyToClipboard(txt, null); alert('Texte copié : collez-le dans WhatsApp, Facebook, un SMS…');
+}
+function qrInviteText(c){
+  const items = qrItems(c), num = qrNumOf(c);
+  let t = (c.title ? c.title + '\n\n' : '');
+  items.forEach(it => { t += it.label.replace(/^[^\wÀ-ÿ]+/, '') + ' :\n' + it.url + '\n\n'; });
+  return t + `Ou envoyez simplement un SMS « ${c.kw} » au ${num}.`;
+}
+// ----- Chiffrement : le formulaire en ligne chiffre avec la clé publique de CE téléphone ; seul lui peut lire -----
+function b64u(buf){ const u = new Uint8Array(buf); let s = ''; for(let i = 0; i < u.length; i += 8192) s += String.fromCharCode.apply(null, u.subarray(i, i + 8192)); return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
+function unb64u(t){ t = String(t).replace(/-/g, '+').replace(/_/g, '/'); while(t.length % 4) t += '='; const s = atob(t), u = new Uint8Array(s.length); for(let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u; }
+async function ecdhKeys(){
+  let st = null; try{ st = JSON.parse(localStorage.getItem(ECDH_KEY) || 'null'); }catch(e){}
+  if(st && st.pub && st.priv) return st;
+  const kp = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveKey']);
+  st = { pub: b64u(await crypto.subtle.exportKey('raw', kp.publicKey)), priv: await crypto.subtle.exportKey('jwk', kp.privateKey) };
+  try{ localStorage.setItem(ECDH_KEY, JSON.stringify(st)); }catch(e){}
+  return st;
+}
+async function insDecrypt(privJwk, sub){
+  const priv = await crypto.subtle.importKey('jwk', privJwk, { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveKey']);
+  const epk = await crypto.subtle.importKey('raw', unb64u(sub.e), { name: 'ECDH', namedCurve: 'P-256' }, false, []);
+  const key = await crypto.subtle.deriveKey({ name: 'ECDH', public: epk }, priv, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64u(sub.i) }, key, unb64u(sub.c));
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+// ----- Registre des inscriptions (SMS reçus + formulaire internet) -----
+function regGet(){ try{ const a = JSON.parse(localStorage.getItem(REG_KEY) || '[]'); return Array.isArray(a) ? a : []; }catch(e){ return []; } }
+function regSet(a){ try{ localStorage.setItem(REG_KEY, JSON.stringify(a.slice(-5000))); }catch(e){} }
+function regAdd(rec){ const l = regGet(); if(l.some(x => x.id === rec.id)) return false; l.push(rec); regSet(l); return true; }
+function regParseBody(body){
+  const f = {};
+  String(body || '').split(/\r?\n| - /).map(x => x.trim()).filter(Boolean).forEach(p => {
+    const m = p.match(/^([^:]{1,40}):\s*(.*)$/);
+    if(m && !/^accord sms$/i.test(m[1].trim()) && m[2].trim()) f[m[1].trim()] = m[2].trim();
+  });
+  return f;
+}
+function regCampOf(text){
+  const t = String(text || '').toUpperCase(); let best = null;
+  qrListGet().forEach(c => { if(c.kw && t.includes(c.kw.toUpperCase()) && (!best || c.kw.length > best.kw.length)) best = c; });
+  return best ? best.name : '';
+}
+async function insFetch(){
+  const camps = qrListGet().filter(c => c.token), out = { got: 0, unreadable: 0, errors: 0, lastErr: '' };
+  if(!camps.length) return out;
+  const keys = await ecdhKeys();
+  for(const c of camps){
+    let data = null;
+    try{ const res = await fetch(`${SYNC_DB_URL}/${INSC_PATH}/${encodeURIComponent(c.token)}.json`); if(!res.ok) throw new Error('HTTP ' + res.status); data = await res.json(); }
+    catch(e){ out.errors++; out.lastErr = String(e && e.message || e); continue; }
+    if(!data) continue;
+    for(const id of Object.keys(data)){
+      const sub = data[id]; if(!sub || !sub.c) continue;
+      try{
+        const o = await insDecrypt(keys.priv, sub);
+        const ph = normCI(o.phone || '');
+        regAdd({ id: 'i:' + c.token + ':' + id, ts: o.ts || sub.ts || Date.now(), src: 'internet', camp: c.name, phone: ph && ph.num ? ph.num : String(o.phone || ''), f: o.f || {} });
+        out.got++;
+        try{ await fetch(`${SYNC_DB_URL}/${INSC_PATH}/${encodeURIComponent(c.token)}/${encodeURIComponent(id)}.json`, { method: 'DELETE' }); }catch(e){}   // effacé du serveur une fois lu
+      }catch(e){ out.unreadable++; }
+    }
+  }
+  return out;
+}
+async function insTest(){
+  const url = `${SYNC_DB_URL}/${INSC_PATH}/_test.json`;
+  try{
+    let r = await fetch(url, { method: 'PUT', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ t: Date.now() }) });
+    if(!r.ok) return `❌ Écriture refusée (HTTP ${r.status}) : ajoutez la règle Firebase « inscriptions » (voir le guide).`;
+    r = await fetch(url); if(!r.ok) return `⚠️ Écriture OK mais lecture refusée (HTTP ${r.status}) : ajoutez aussi le droit de lecture.`;
+    await fetch(url, { method: 'DELETE' }); return '✅ Connexion OK : les inscriptions par internet arriveront dans l\'application.';
+  }catch(e){ return '❌ Pas de connexion internet (' + (e && e.message || e) + ').'; }
+}
+function regCsv(list){
+  const labels = []; list.forEach(r => Object.keys(r.f || {}).forEach(k => { if(labels.indexOf(k) < 0) labels.push(k); }));
+  const q = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+  const head = ['Date', 'Source', 'QR', 'Téléphone'].concat(labels);
+  const rows = list.map(r => [new Date(r.ts).toLocaleString('fr-FR'), r.src === 'internet' ? 'Internet' : 'SMS', r.camp || '', r.phone || ''].concat(labels.map(k => (r.f || {})[k] || '')));
+  return [head].concat(rows).map(a => a.map(q).join(';')).join('\n');
+}
+function regOpen(){
+  const body = sheetOpen('📒 Registre des inscriptions', `
+    <p class="dim">Toutes les inscriptions reçues, par SMS ou par internet, avec les informations complétées.</p>
+    <input type="text" id="rgFilter" placeholder="Filtrer (nom, métier, ville, numéro…)">
+    <div id="rgInfo" style="font-size:13px;font-weight:700;margin:6px 0;"></div>
+    <div id="rgList" style="max-height:48vh;overflow:auto;"></div>
+    <div class="row" style="gap:8px;margin:10px 0;flex-wrap:wrap;"><select id="rgBase" style="flex:1 1 100%;">${db.phoneBases.map(b => `<option value="${b.id}">${escapeHtml(b.name)}</option>`).join('')}</select>
+    <button type="button" class="btn btn-primary btn-small" id="rgAdd" style="flex:1 1 100%;">➕ Ajouter ces numéros à la base choisie</button>
+    <button type="button" class="btn btn-secondary btn-small" id="rgCopy" style="flex:1 1 45%;">📋 Copier (tableau)</button>
+    <button type="button" class="btn btn-secondary btn-small" id="rgShare" style="flex:1 1 45%;">📤 Partager le fichier</button>
+    <button type="button" class="btn btn-secondary btn-small" id="rgClear" style="flex:1 1 100%;">🗑️ Vider le registre</button></div>`);
+  const filtered = () => { const t = body.querySelector('#rgFilter').value.trim().toLowerCase(); return regGet().filter(r => !t || (r.phone + ' ' + (r.camp || '') + ' ' + Object.values(r.f || {}).join(' ')).toLowerCase().includes(t)).sort((a, b) => b.ts - a.ts); };
+  const draw = () => {
+    const list = filtered();
+    body.querySelector('#rgInfo').textContent = `${list.length} inscription(s) sur ${regGet().length}`;
+    body.querySelector('#rgList').innerHTML = list.slice(0, 150).map(r => `<div style="border:1px solid #cfe3f0;border-radius:10px;padding:8px;margin:6px 0;background:#f6fbff;font-size:13px;">
+      <b>${escapeHtml(r.phone || 'numéro inconnu')}</b> · ${r.src === 'internet' ? '🌐 internet' : '📱 SMS'} · ${escapeHtml(new Date(r.ts).toLocaleDateString('fr-FR'))}${r.camp ? ' · ' + escapeHtml(r.camp) : ''}<br>
+      ${Object.keys(r.f || {}).map(k => `<span style="color:#4a6176;">${escapeHtml(k)} :</span> ${escapeHtml(r.f[k])}`).join('<br>') || '<i>(aucune information)</i>'}</div>`).join('') || '<div class="empty">Aucune inscription pour le moment.</div>';
+  };
+  body.querySelector('#rgFilter').addEventListener('input', draw); draw();
+  body.querySelector('#rgAdd').addEventListener('click', () => {
+    const bid = body.querySelector('#rgBase').value; if(!bid){ alert("Créez d'abord une base de numéros."); return; }
+    importReview(bid, '📒 Inscriptions', filtered().map(r => ({ raw: r.phone, label: Object.values(r.f || {}).slice(0, 3).join(' · ') })));
+  });
+  body.querySelector('#rgCopy').addEventListener('click', e => copyToClipboard(regCsv(filtered()), e.target));
+  body.querySelector('#rgShare').addEventListener('click', () => {
+    const csv = regCsv(filtered());
+    if(NATIVE){ try{ ShamanNative.saveText('inscriptions.csv', csv); return; }catch(e){} }
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv' })); a.download = 'inscriptions.csv'; document.body.appendChild(a); a.click(); a.remove();
+  });
+  body.querySelector('#rgClear').addEventListener('click', () => { if(confirm('Vider tout le registre ? (les numéros déjà ajoutés aux bases ne sont pas touchés)')){ regSet([]); draw(); renderQrCard(); } });
+}
+function rndToken(){ const a = new Uint8Array(9); crypto.getRandomValues(a); return Array.from(a).map(x => (x % 36).toString(36)).join('') + Date.now().toString(36).slice(-3); }
+async function qrEditSave(c, body){
+  const name = body.querySelector('#qeName').value.trim(), num = body.querySelector('#qeNum').value.trim(), n = normCI(num);
+  if(!name){ alert('Donnez un nom à ce QR.'); return; }
+  if(!n || n.kind !== 'mobile'){ alert('Indiquez un numéro mobile valide (10 chiffres, ex. 0748935686).'); return; }
+  const nc = { id: c.id || ('q' + Date.now()), name, num, kw: (body.querySelector('#qeKw').value.trim() || qrKwFrom(name)).toUpperCase().replace(/\s+/g, '-'), type: body.querySelector('#qeType').value, mode: body.querySelector('#qeMode').value,
+    fields: body.querySelector('#qeFields').value.split(',').map(x => x.trim()).filter(Boolean).join(','), title: body.querySelector('#qeTitle').value.trim(), sub: body.querySelector('#qeSub').value.trim(), agency: body.querySelector('#qeAgency').value.trim(),
+    token: c.token || rndToken(), pk: '' };
+  try{ nc.pk = (await ecdhKeys()).pub; }catch(e){ nc.pk = ''; }
+  let worst = 0;
+  try{ qrItems(nc).forEach(it => { worst = Math.max(worst, QRGen.make(it.url).version); }); }
+  catch(e){ alert('Ce QR serait trop chargé : raccourcissez le titre, le sous-titre ou la liste des informations demandées.'); return; }
+  if(worst > 25 && !confirm(`Ce QR est très dense (version ${worst}) : il faudra l'imprimer en grand. Continuer ? (Astuce : moins d'informations demandées = QR plus simple.)`)) return;
+  const l = qrListGet(), i = l.findIndex(x => x.id === nc.id); if(i >= 0) l[i] = nc; else l.push(nc);
+  qrListSet(l); sheetClose(); renderQrCard();
 }
 function qrEdit(id){
-  const list = qrListGet(), ex = list.find(x => x.id === id);
-  const c = Object.assign({ id: '', name: '', num: '', kw: '', type: 'sms', mode: 'form', fields: 'Nom,Métier,Quartier', title: "Demandeurs d'emploi : inscrivez-vous !", sub: 'Agence de recrutement et de placement', agency: 'SHAMAN CHOOZ PRODUCTION' }, ex || {});
+  const ex = qrListGet().find(x => x.id === id);
+  const c = Object.assign({ id: '', name: '', num: '', kw: '', type: 'sms', mode: qrSiteGet() ? 'both' : 'sms', fields: 'Nom,Métier,Quartier', title: "Demandeurs d'emploi : inscrivez-vous !", sub: 'Agence de recrutement et de placement', agency: 'SHAMAN CHOOZ PRODUCTION' }, ex || {});
+  const m = qrModeOf(c);
   const body = sheetOpen(ex ? '✏️ Modifier ce QR' : '➕ Nouveau QR', `
     <label>Nom de ce QR (pour vous y retrouver)</label><input type="text" id="qeName" value="${escapeHtml(c.name)}" placeholder="Ex. Plombiers Abidjan">
     <label>Numéro qui reçoit les inscriptions</label><input type="tel" inputmode="tel" id="qeNum" value="${escapeHtml(c.num)}" placeholder="0748935686">
-    <label>Mot-clé de reconnaissance (commence par INSCRIPTION)</label><input type="text" id="qeKw" value="${escapeHtml(c.kw)}" placeholder="auto">
-    <label>Type d'envoi</label><select id="qeType"><option value="sms" ${c.type === 'sms' ? 'selected' : ''}>SMS</option><option value="wa" ${c.type === 'wa' ? 'selected' : ''}>WhatsApp</option></select>
-    <label>Que scanne / touche la personne ?</label><select id="qeMode"><option value="form" ${c.mode !== 'direct' ? 'selected' : ''}>Un formulaire en ligne (recommandé)</option><option value="direct" ${c.mode === 'direct' ? 'selected' : ''}>Un message pré-écrit, sans formulaire</option></select>
-    <label>Informations demandées (séparées par des virgules)</label><input type="text" id="qeFields" value="${escapeHtml(c.fields)}">
+    <label>Mot-clé de reconnaissance</label><input type="text" id="qeKw" value="${escapeHtml(c.kw)}" placeholder="auto">
+    <label>Type d'envoi</label><select id="qeType"><option value="sms" ${c.type === 'sms' ? 'selected' : ''}>SMS (fonctionne sans internet)</option><option value="wa" ${c.type === 'wa' ? 'selected' : ''}>WhatsApp (demande internet)</option></select>
+    <label>Comment la personne s'inscrit</label><select id="qeMode">
+      <option value="sms" ${m === 'sms' ? 'selected' : ''}>📴 Sans internet : le SMS complet s'ouvre, elle le complète et l'envoie</option>
+      <option value="form" ${m === 'form' ? 'selected' : ''}>🌐 En ligne : formulaire (SMS ou internet)</option>
+      <option value="both" ${m === 'both' ? 'selected' : ''}>📴+🌐 Les deux sur la même affiche (recommandé)</option></select>
+    <label>Informations demandées (séparées par des virgules, autant que vous voulez)</label><input type="text" id="qeFields" value="${escapeHtml(c.fields)}">
     <label>Titre</label><input type="text" id="qeTitle" value="${escapeHtml(c.title)}">
     <label>Sous-titre</label><input type="text" id="qeSub" value="${escapeHtml(c.sub)}">
     <label>Nom de votre agence (affiché sur le formulaire)</label><input type="text" id="qeAgency" value="${escapeHtml(c.agency)}">
     <button type="button" class="btn btn-primary" id="qeSave" style="margin-top:12px;">💾 Enregistrer</button>`);
-  body.querySelector('#qeSave').addEventListener('click', () => {
-    const name = body.querySelector('#qeName').value.trim(), num = body.querySelector('#qeNum').value.trim();
-    const n = normCI(num);
-    if(!name){ alert('Donnez un nom à ce QR.'); return; }
-    if(!n || n.kind !== 'mobile'){ alert('Indiquez un numéro mobile valide (10 chiffres, ex. 0748935686).'); return; }
-    const nc = { id: c.id || ('q' + Date.now()), name, num, kw: (body.querySelector('#qeKw').value.trim() || qrKwFrom(name)).toUpperCase().replace(/\s+/g, '-'), type: body.querySelector('#qeType').value, mode: body.querySelector('#qeMode').value,
-      fields: body.querySelector('#qeFields').value.split(',').map(x => x.trim()).filter(Boolean).join(','), title: body.querySelector('#qeTitle').value.trim(), sub: body.querySelector('#qeSub').value.trim(), agency: body.querySelector('#qeAgency').value.trim() };
-    try{ QRGen.make(qrContent(nc)); }catch(e){ alert('Ce QR serait trop chargé : raccourcissez le titre, le sous-titre ou la liste des informations.'); return; }
-    const l = qrListGet(), i = l.findIndex(x => x.id === nc.id); if(i >= 0) l[i] = nc; else l.push(nc);
-    qrListSet(l); sheetClose(); renderQrCard();
-  });
+  body.querySelector('#qeSave').addEventListener('click', () => qrEditSave(c, body));
 }
 function qrShow(id){
   const c = qrListGet().find(x => x.id === id); if(!c) return;
-  const link = qrShareLink(c), isForm = c.mode !== 'direct' && !!qrFormLink(c);
-  const poster = qrPoster(c); poster.style.cssText = 'width:100%;max-width:360px;border:1px solid #cfe3f0;border-radius:10px;display:block;margin:0 auto;';
+  const items = qrItems(c), poster = qrPoster(c); poster.style.cssText = 'width:100%;max-width:360px;border:1px solid #cfe3f0;border-radius:10px;display:block;margin:0 auto;';
+  const needSite = qrModeOf(c) !== 'sms' && !qrFormLink(c);
   const body = sheetOpen('🖼️ ' + escapeHtml(c.name), `<div id="qsPoster"></div>
-    <div style="font-size:13px;margin:12px 0 4px;font-weight:700;">Lien à envoyer (pour ceux qui ne peuvent pas scanner)</div>
-    <textarea id="qsLink" readonly style="min-height:90px;font-size:13px;">${escapeHtml(link)}</textarea>
-    ${isForm ? '' : '<p class="dim">Ce lien ouvre directement la messagerie. Pour un formulaire en ligne : indiquez l\'adresse de votre site (carte « QR d\'inscription ») et mettez « inscription.html » dans votre dépôt web.</p>'}
+    ${needSite ? '<p class="dim">Pour le formulaire en ligne, indiquez l\'adresse de votre site dans la carte « Inscription ».</p>' : ''}
+    <div style="font-size:13px;margin:12px 0 4px;font-weight:700;">Liens à envoyer (pour ceux qui ne peuvent pas scanner)</div>
+    ${items.map(it => `<div style="font-size:12.5px;margin-top:6px;font-weight:700;">${escapeHtml(it.label)}</div><textarea readonly style="min-height:70px;font-size:12.5px;">${escapeHtml(it.url)}</textarea>`).join('')}
+    <div style="font-size:13px;margin:12px 0 4px;font-weight:700;">📨 Modèle de SMS à envoyer aux personnes (elles répondent en le complétant)</div>
+    <textarea id="qsTpl" readonly style="min-height:120px;">${escapeHtml(((c.agency ? c.agency + ' : pour vous inscrire, répondez à ce SMS en complétant chaque ligne.\n\n' : 'Pour vous inscrire, répondez à ce SMS en complétant chaque ligne.\n\n')) + qrSmsBody(c))}</textarea>
     <div class="row" style="gap:8px;margin-top:8px;flex-wrap:wrap;">
-      <button type="button" class="btn btn-primary btn-small" id="qsShareLink" style="flex:1 1 45%;">🔗 Partager le lien</button>
-      <button type="button" class="btn btn-secondary btn-small" id="qsCopy" style="flex:1 1 45%;">📋 Copier le lien</button>
+      <button type="button" class="btn btn-primary btn-small" id="qsShareLink" style="flex:1 1 45%;">🔗 Partager les liens</button>
+      <button type="button" class="btn btn-secondary btn-small" id="qsCopy" style="flex:1 1 45%;">📋 Copier les liens</button>
+      <button type="button" class="btn btn-secondary btn-small" id="qsTplUse" style="flex:1 1 100%;">✉️ Utiliser ce modèle dans l'onglet SMS</button>
       <button type="button" class="btn btn-secondary btn-small" id="qsImg" style="flex:1 1 100%;">${NATIVE ? '📤 Partager l\'affiche (image)' : '⬇️ Enregistrer l\'affiche (image)'}</button></div>`);
   body.querySelector('#qsPoster').appendChild(poster);
-  body.querySelector('#qsShareLink').addEventListener('click', () => qrShareLinkText(c));
-  body.querySelector('#qsCopy').addEventListener('click', e => copyToClipboard(link, e.target));
+  body.querySelector('#qsShareLink').addEventListener('click', () => shareTextNow(qrInviteText(c)));
+  body.querySelector('#qsCopy').addEventListener('click', e => copyToClipboard(qrInviteText(c), e.target));
   body.querySelector('#qsImg').addEventListener('click', () => qrShareImage(poster));
+  body.querySelector('#qsTplUse').addEventListener('click', () => {
+    const ta = document.getElementById('smsBody'); if(!ta) return;
+    ta.value = body.querySelector('#qsTpl').value; ta.dispatchEvent(new Event('input')); sheetClose();
+    const t = document.querySelector('[data-tab="sms"]'); if(t) t.click();
+    alert("Le modèle est dans l'onglet SMS : choisissez vos destinataires puis envoyez. Chaque personne répond en complétant les lignes.");
+  });
 }
 function renderQrCard(){
   const c = document.getElementById('qrRegCard'); if(!c) return;
-  const list = qrListGet(), site = qrSiteGet();
-  c.innerHTML = `<h2>📲 QR d'inscription (avec accord)</h2>
-    <p class="dim">Créez autant de QR que vous voulez (un par métier, par quartier, par affiche…). La personne scanne le QR <b>ou touche le lien</b> que vous lui envoyez, remplit ses informations et accepte de recevoir vos offres : vous recevez son SMS avec son numéro. Ensuite : « + Ajouter des numéros → 💬 SMS reçus » (Android).</p>
+  const list = qrListGet(), site = qrSiteGet(), regN = regGet().length;
+  c.innerHTML = `<h2>📲 Inscription avec accord (QR, lien, SMS)</h2>
+    <p class="dim">Créez autant de QR que vous voulez. <b>Sans internet</b> : la personne scanne ou touche le lien, le SMS <b>complet</b> s'ouvre (tous les champs d'un coup), elle le complète et l'envoie. <b>Par internet</b> (si elle n'a pas de crédit SMS) : un formulaire envoie ses informations, chiffrées, directement dans votre application.</p>
     <label>Adresse de votre site (pour le formulaire en ligne)</label>
     <input type="text" id="qrSite" value="${escapeHtml(site)}" placeholder="https://votrenom.github.io/votre-depot/">
     <p class="dim" style="margin-top:4px;">Envoyez le fichier <b>inscription.html</b> dans le même dépôt GitHub que votre application web, puis collez ici l'adresse de ce site.</p>
     ${list.length ? list.map(x => `<div style="border:1px solid #cfe3f0;border-radius:12px;padding:10px;margin:10px 0;background:#f6fbff;">
         <div style="font-weight:700;">${escapeHtml(x.name)}</div>
-        <div style="font-size:12.5px;color:#4a6176;">${x.type === 'wa' ? 'WhatsApp' : 'SMS'} → ${escapeHtml(x.num)} · mot-clé ${escapeHtml(x.kw)} · ${x.mode === 'direct' ? 'message direct' : 'formulaire en ligne'}</div>
+        <div style="font-size:12.5px;color:#4a6176;">${x.type === 'wa' ? 'WhatsApp' : 'SMS'} → ${escapeHtml(x.num)} · mot-clé ${escapeHtml(x.kw)} · ${qrModeOf(x) === 'sms' ? '📴 sans internet' : qrModeOf(x) === 'form' ? '🌐 en ligne' : '📴+🌐 les deux'}</div>
         <div class="row" style="gap:6px;margin-top:8px;flex-wrap:wrap;">
-          <button type="button" class="btn btn-primary btn-small" data-qr-show="${x.id}" style="flex:1 1 45%;">🖼️ QR / lien</button>
+          <button type="button" class="btn btn-primary btn-small" data-qr-show="${x.id}" style="flex:1 1 45%;">🖼️ QR / liens</button>
           <button type="button" class="btn btn-secondary btn-small" data-qr-edit="${x.id}" style="flex:1 1 20%;">✏️</button>
           <button type="button" class="btn btn-secondary btn-small" data-qr-del="${x.id}" style="flex:1 1 20%;">🗑️</button></div></div>`).join('') : '<div class="empty">Aucun QR pour le moment.</div>'}
-    <button type="button" class="btn btn-primary" id="qrNew" style="margin-top:8px;">➕ Nouveau QR</button>`;
+    <button type="button" class="btn btn-primary" id="qrNew" style="margin-top:8px;">➕ Nouveau QR</button>
+    <div style="font-weight:700;margin-top:18px;">📥 Inscriptions reçues</div>
+    <div class="row" style="gap:8px;margin-top:6px;flex-wrap:wrap;">
+      <button type="button" class="btn btn-primary btn-small" id="insFetch" style="flex:1 1 100%;">🔄 Récupérer les inscriptions par internet</button>
+      <button type="button" class="btn btn-secondary btn-small" id="insReg" style="flex:1 1 45%;">📒 Registre (${regN})</button>
+      <button type="button" class="btn btn-secondary btn-small" id="insTest" style="flex:1 1 45%;">🔌 Tester la connexion</button></div>
+    <div id="insMsg" style="font-size:13px;font-weight:700;margin-top:8px;min-height:18px;"></div>
+    <p class="dim">Les inscriptions par SMS se récupèrent avec « + Ajouter des numéros → 💬 SMS reçus » (Android) et vont aussi dans le registre.</p>`;
+  const msg = t => { const e = c.querySelector('#insMsg'); if(e) e.textContent = t; };
   c.querySelector('#qrSite').addEventListener('change', e => { const u = qrSiteNorm(e.target.value); try{ localStorage.setItem(QR_SITE_KEY, u); }catch(err){} e.target.value = u; });
   c.querySelector('#qrNew').addEventListener('click', () => qrEdit(''));
+  c.querySelector('#insReg').addEventListener('click', regOpen);
+  c.querySelector('#insTest').addEventListener('click', async () => { msg('Test en cours…'); msg(await insTest()); });
+  c.querySelector('#insFetch').addEventListener('click', async () => {
+    msg('Recherche des inscriptions…');
+    try{
+      const r = await insFetch();
+      msg((r.errors ? `⚠️ ${r.errors} QR non lu(s) (${r.lastErr}). ` : '') + `✅ ${r.got} nouvelle(s) inscription(s) reçue(s)` + (r.unreadable ? ` · ${r.unreadable} illisible(s) sur ce téléphone` : '') + '.');
+      c.querySelector('#insReg').textContent = `📒 Registre (${regGet().length})`;
+    }catch(e){ msg('❌ ' + (e && e.message || e)); }
+  });
   c.querySelectorAll('[data-qr-show]').forEach(b => b.addEventListener('click', () => qrShow(b.dataset.qrShow)));
   c.querySelectorAll('[data-qr-edit]').forEach(b => b.addEventListener('click', () => qrEdit(b.dataset.qrEdit)));
   c.querySelectorAll('[data-qr-del]').forEach(b => b.addEventListener('click', () => { if(confirm('Supprimer ce QR ?')){ qrListSet(qrListGet().filter(x => x.id !== b.dataset.qrDel)); renderQrCard(); } }));
@@ -2211,6 +2376,7 @@ function initQrCard(){
   const c = document.createElement('div'); c.className = 'card'; c.id = 'qrRegCard'; tab.appendChild(c); renderQrCard();
 }
 if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initQrCard); else initQrCard();
+
 const smsCounterUpdaters = [];
 function smsCounterFor(ta){
   const el = document.createElement('div'); el.style.cssText = 'font-size:12.5px;margin:4px 0 10px;font-weight:700;';
@@ -3571,10 +3737,12 @@ function renderRobot(){
   const ql=rbQuotaLeft(), quotaBanner = ql<=0 ? '<div class="batch" style="border-color:#c43e3e;"><b>⏸ Quota quotidien atteint.</b><div class="dim" style="font-size:12px;">L\'ouverture automatique est en pause jusqu\'à demain (protection anti-spam). Vous pouvez toujours envoyer manuellement ci-dessous.</div></div>' : '';
   $r('robotQuotaInfo').textContent = db.robotSettings.maxPerDay>0 ? `Envoyés aujourd'hui : ${rbSentToday()} / ${db.robotSettings.maxPerDay}` : `Envoyés aujourd'hui : ${rbSentToday()} (illimité)`;
   const el=$r('robotDue');
-  const dueHtml=quotaBanner+(items.length?items.map(({j,r,c,err,wait,msg})=>{
+  const waitN = items.filter(x => x.wait).length;
+  const bulk = items.length > 1 ? `<div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:10px;">${waitN ? `<button class="btn btn-secondary btn-small" data-rb-del-wait style="flex:1 1 100%;">🗑️ Supprimer tous les envois en attente (${waitN})</button>` : ''}<button class="btn btn-secondary btn-small" data-rb-del-all style="flex:1 1 100%;">🗑️ Tout supprimer (${items.length})</button></div>` : '';
+  const dueHtml=quotaBanner+bulk+(items.length?items.map(({j,r,c,err,wait,msg})=>{
     const late=Date.now()-j.at>36e5, hh=new Date(j.at).toLocaleString('fr-FR',{weekday:'short',hour:'2-digit',minute:'2-digit'}), nm=escapeHtml(r.name)+' · '+hh;
-    if(wait) return `<div class="batch"><b>${nm}</b><div class="dim" style="font-size:12px;">⏳ En attente de l'envoi précédent de cette base.</div></div>`;
-    if(err) return `<div class="batch"><b>${nm}</b><div class="dim">${err}</div><button class="btn btn-secondary btn-small" data-rb-skip="${j.id}">Ignorer</button></div>`;
+    if(wait) return `<div class="batch"><div class="row" style="align-items:center;gap:8px;"><div style="flex:1 1 auto;min-width:0;"><b>${nm}</b><div class="dim" style="font-size:12px;">⏳ En attente de l'envoi précédent de cette base.</div></div><button class="btn btn-secondary btn-small" data-rb-skip="${j.id}" style="flex:0 0 auto;width:auto;">🗑️ Supprimer</button></div></div>`;
+    if(err) return `<div class="batch"><b>${nm}</b><div class="dim">${err}</div><button class="btn btn-secondary btn-small" data-rb-skip="${j.id}">🗑️ Supprimer</button></div>`;
     const n=c.nums.map(x=>x.replace(/\s+/g,'')), q='?body='+encodeURIComponent(msg);
     return `<div class="batch"><div class="batch-head"><span class="label">${late?'⚠️ ':'🔔 '}${nm}</span><span class="count">${n.length} n°</span></div>
       ${rbSenderFor(r,j)?`<div style="font-size:12.5px;color:#C43E71;font-weight:700;">📱 Depuis : ${escapeHtml(rbSenderFor(r,j))}</div>`:''}
@@ -3582,14 +3750,17 @@ function renderRobot(){
       <div class="row">${NATIVE?`<button class="btn btn-primary" data-rb-drain="${j.id}">⚡ Envoyer tous les lots</button>`:`<a class="btn btn-primary" style="text-align:center;text-decoration:none;" data-rb-open="${j.id}" href="sms:${n.join(',')}${q}">Ouvrir SMS</a>`}
       <button class="btn btn-secondary btn-small" data-rb-ok="${j.id}">✓ Envoyé</button></div>
       <div class="row" style="margin-top:6px;"><a class="btn btn-secondary btn-small" style="text-align:center;text-decoration:none;flex:1;" href="sms:${n.join(';')}${q}">Autre format</a>
-      <button class="btn btn-secondary btn-small" data-rb-skip="${j.id}" style="flex:0 0 auto;">Passer</button></div></div>`;
+      <button class="btn btn-secondary btn-small" data-rb-skip="${j.id}" style="flex:0 0 auto;">🗑️ Supprimer</button></div></div>`;
   }).join(''):(quotaBanner?'':'<div class="empty">Rien à envoyer pour le moment.</div>'));
   setHtml(el,dueHtml);
   const J=id=>db.robotJobs.find(x=>x.id===id);
   el.querySelectorAll('[data-rb-open]').forEach(b=>b.onclick=()=>{rbAwait=b.dataset.rbOpen;rbAwaitAt=Date.now();rbHid=false;});
   el.querySelectorAll('[data-rb-drain]').forEach(b=>b.onclick=()=>{ if(rbAwait){ alert('Un envoi automatique est déjà en cours.'); return; } const it=rbItems().find(x=>x.j.id===b.dataset.rbDrain&&x.c); if(it) rbDrain(it,true); });
   el.querySelectorAll('[data-rb-ok]').forEach(b=>b.onclick=()=>{const j=J(b.dataset.rbOk),r=j&&db.robotRules.find(x=>x.id===j.ruleId);if(NATIVE&&rbAwait===b.dataset.rbOk){alert('Un envoi automatique est en cours pour ce lot.');return;}if(r)rbSent(r,j);});
-  el.querySelectorAll('[data-rb-skip]').forEach(b=>b.onclick=()=>{const j=J(b.dataset.rbSkip);if(j){j.status='skipped';j.updatedAt=Date.now();saveDB();renderRobot();}});
+  el.querySelectorAll('[data-rb-skip]').forEach(b=>b.onclick=()=>{const j=J(b.dataset.rbSkip);if(!j) return; if(rbAwait===j.id){ alert('Un envoi est en cours pour cette tâche : arrêtez-le d\'abord.'); return; } if(!confirm('Supprimer cet envoi ?')) return; j.status='skipped';j.updatedAt=Date.now();saveDB();renderRobot();});
+  const delMany = (list, label) => { const ids = list.filter(x => x.j.id !== rbAwait).map(x => x.j.id); if(!ids.length) return; if(!confirm(`Supprimer ${ids.length} envoi(s) ${label} ? Les envois déjà partis ne sont pas touchés.`)) return; const set = new Set(ids), now = Date.now(); db.robotJobs.forEach(j => { if(set.has(j.id) && j.status === 'todo'){ j.status = 'skipped'; j.updatedAt = now; } }); saveDB(); renderRobot(); };
+  const bw = el.querySelector('[data-rb-del-wait]'); if(bw) bw.onclick = () => delMany(rbItems().filter(x => x.wait), 'en attente');
+  const ba = el.querySelector('[data-rb-del-all]'); if(ba) ba.onclick = () => delMany(rbItems(), '(en attente et prêts)');
   const logs=db.robotJobs.flatMap(j=>(j.log||[]).map(l=>({j,l}))).sort((a,b)=>b.l.t-a.l.t).slice(0,8);
   setHtml($r('robotLog'),logs.length?logs.map(({j,l},i)=>{const r=db.robotRules.find(x=>x.id===j.ruleId)||{name:'?'};
     return `<div class="group-item"><div class="meta">${new Date(l.t).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})} · ${escapeHtml(r.name)} · ${l.n} numéros ${i===0?`<button class="btn btn-secondary btn-small" data-rb-undo="${j.id}">↩ Annuler</button>`:''}</div></div>`;}).join(''):'<div class="empty">Aucun envoi.</div>');
