@@ -40,7 +40,7 @@
     </div>
     <label class="consent" for="ok"><input type="checkbox" id="ok"><span id="consentTxt"></span></label>
     <a class="btn" id="go" aria-disabled="true" href="#">📱 Envoyer mon inscription par SMS</a>
-    <p class="or hide" id="orTxt">— ou, si vous n'avez pas de crédit SMS —</p>
+    <p class="or hide" id="orTxt">— ou, si le SMS ne s'ouvre pas ou si vous n'avez pas de crédit —</p>
     <button class="btn alt hide" id="net" type="button" aria-disabled="true">🌐 Envoyer par internet (gratuit)</button>
     <div class="note" id="how"></div>
     <p class="hide" id="status"></p>
@@ -86,7 +86,7 @@
   document.getElementById('how').textContent = (type === 'wa'
     ? "En touchant le bouton, WhatsApp s'ouvre avec votre message déjà écrit : il ne vous reste qu'à l'envoyer."
     : "En touchant le bouton, votre messagerie SMS s'ouvre avec votre message déjà écrit : il ne vous reste qu'à l'envoyer.")
-    + (canNet ? " Sans crédit SMS, utilisez l'envoi par internet : il faut alors indiquer votre numéro." : "") + " Votre accord est enregistré avec votre inscription.";
+    + (canNet ? " Si le SMS ne s'ouvre pas, ou sans crédit SMS, utilisez l'envoi par internet : il faut alors indiquer votre numéro." : "") + " Votre accord est enregistré avec votre inscription.";
   function val(i){ return (document.getElementById('f' + i).value || '').replace(/\s+/g, ' ').trim(); }
   function message(){
     var lines = [kw];

@@ -150,6 +150,39 @@
     .tabpanel.active{column-count:3;}
   }
 
+  /* ============ Cartes repliables, sous-onglets, bases cliquables ============ */
+  .card.cc > h2{cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;user-select:none;-webkit-tap-highlight-color:transparent;}
+  .card.cc > h2::after{content:'▾';font-size:15px;color:var(--text-dim);transition:transform .15s ease;flex:0 0 auto;}
+  .card.cc.collapsed > h2{margin-bottom:0;}
+  .card.cc.collapsed > h2::after{transform:rotate(-90deg);}
+  .card.cc.collapsed > :not(h2){display:none !important;}
+
+  .subtabs{display:flex;gap:6px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:5px;margin-bottom:14px;overflow-x:auto;column-span:all;}
+  .subtabs button{flex:1;white-space:nowrap;background:transparent;border:none;color:var(--text-dim);font-weight:600;font-size:12.5px;padding:9px 10px;border-radius:9px;cursor:pointer;font-family:inherit;}
+  .subtabs button.active{background:var(--sky-dim);color:var(--sky);box-shadow:inset 0 0 0 1px var(--line);}
+  #tab-bases [data-sub-pane]{display:none;}
+  #tab-bases[data-sub="list"] [data-sub-pane="list"],
+  #tab-bases[data-sub="create"] [data-sub-pane="create"],
+  #tab-bases[data-sub="send"] [data-sub-pane="send"],
+  #tab-bases[data-sub="reg"] [data-sub-pane="reg"],
+  #tab-bases[data-sub="trash"] [data-sub-pane="trash"]{display:block;}
+
+  .base-row{padding:0;}
+  .base-head{display:flex;align-items:center;gap:10px;padding:12px 0;cursor:pointer;-webkit-tap-highlight-color:transparent;}
+  .base-head .bh-main{flex:1;min-width:0;}
+  .base-head .chev{font-size:16px;color:var(--text-dim);transition:transform .15s ease;flex:0 0 auto;}
+  .base-row.open .base-head .chev{transform:rotate(180deg);}
+  .base-body{padding:0 0 14px;}
+
+  #toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:#0F2436;color:#fff;padding:11px 16px;border-radius:12px;font-size:13.5px;line-height:1.4;z-index:2000;max-width:88vw;text-align:center;opacity:0;pointer-events:none;transition:opacity .2s ease;}
+  #toast.show{opacity:1;}
+
+  .ar-offer{display:flex;gap:8px;align-items:flex-start;padding:9px 0;border-bottom:1px solid var(--line);}
+  .ar-offer:last-child{border-bottom:none;}
+  .ar-log{border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin:6px 0;background:#F6FBFF;font-size:12.5px;line-height:1.45;}
+  .ar-log .t{color:var(--text-dim);font-size:11.5px;}
+  .ar-out{border:1px solid var(--line);border-radius:10px;padding:10px;margin-top:10px;background:#fff;font-size:13.5px;line-height:1.5;white-space:pre-wrap;word-break:break-word;}
+
 </style>
 </head>
 <body>
@@ -209,6 +242,7 @@
     <button class="tab-btn" data-tab="media">Médias · WhatsApp</button>
     <button class="tab-btn" data-tab="scheduled">Programmés</button>
     <button class="tab-btn" data-tab="robot">🤖 Robot</button>
+    <button class="tab-btn" data-tab="auto">💬 Réponses auto</button>
     <button class="tab-btn" data-tab="scanner">📷 Scanner</button>
     <button class="tab-btn" data-tab="blocked">🚫 Bloqués</button>
   </nav>
@@ -473,6 +507,8 @@
     </div>
     <div class="card">
       <h2>Message</h2>
+      <label style="margin-top:0;">📨 Modèle d'inscription (facultatif)</label>
+      <select id="smsTplSelect" style="margin-bottom:8px;"><option value="">— Insérer un modèle —</option></select>
       <textarea id="smsBody" placeholder="Votre message…"></textarea>
       <div class="counter" id="smsCounter">0 caractère · 1 SMS</div>
     </div>
@@ -482,11 +518,18 @@
     </div>
     <div class="card">
       <h2>Destinataires</h2>
-      <div class="row" id="smsSourceRow" style="margin-bottom:8px;">
-        <label class="check-row" style="flex:1;"><input type="radio" name="smsSource" value="contacts" checked> Contacts / Groupes</label>
-        <label class="check-row" style="flex:1;"><input type="radio" name="smsSource" value="numbers"> Numéros saisis</label>
+      <div class="row" id="smsSourceRow" style="margin-bottom:8px;flex-wrap:wrap;">
+        <label class="check-row" style="flex:1 1 45%;"><input type="radio" name="smsSource" value="contacts" checked> Contacts / Groupes</label>
+        <label class="check-row" style="flex:1 1 45%;"><input type="radio" name="smsSource" value="base"> Base de numéros</label>
+        <label class="check-row" style="flex:1 1 45%;"><input type="radio" name="smsSource" value="numbers"> Numéros saisis</label>
       </div>
       <div id="smsRecipientPicker"></div>
+      <div id="smsBaseWrap" style="display:none;">
+        <select id="smsBaseSelect"><option value="">— Choisir une base —</option></select>
+        <div class="counter" id="smsBaseInfo" style="text-align:left;margin:4px 0 8px;"></div>
+        <label class="check-row"><input type="radio" name="smsBaseMode" value="rest" checked> Seulement les numéros pas encore traités (la progression de la base avance à chaque lot « ✓ Envoyé »)</label>
+        <label class="check-row"><input type="radio" name="smsBaseMode" value="all"> Toute la base (sans toucher à la progression)</label>
+      </div>
       <div id="smsNumbersWrap" style="display:none;">
         <textarea id="smsNumbersInput" inputmode="tel" placeholder="Un numéro par ligne (ou séparés par une virgule)" style="min-height:90px;"></textarea>
         <label>Indicatif à appliquer aux numéros sans indicatif</label>
@@ -668,6 +711,90 @@
     </div>
   </div>
 
+  <!-- ===================== RÉPONSES AUTOMATIQUES ===================== -->
+  <div class="tabpanel" id="tab-auto">
+    <div class="card" id="arMainCard">
+      <h2>💬 Réponses automatiques</h2>
+      <p class="dim">Quand quelqu'un vous écrit par SMS, ce téléphone répond tout seul, selon qui écrit : un candidat / employé, un recruteur / employeur, ou une personne qui demande les offres d'emploi disponibles. Chaque réponse est un vrai SMS (il utilise votre crédit).</p>
+      <label class="check-row"><input type="checkbox" id="arEnabled"> Activer les réponses automatiques sur ce téléphone</label>
+      <div id="arStatus" class="dim" style="font-size:12.5px;margin-top:6px;line-height:1.5;"></div>
+      <div class="row" style="margin-top:8px;gap:6px;flex-wrap:wrap;">
+        <button type="button" class="btn btn-primary btn-small" id="arPermBtn" style="display:none;">🔓 Autoriser la réception des SMS</button>
+        <button type="button" class="btn btn-secondary btn-small" id="arResetBtn">↺ Remettre les compteurs à zéro</button>
+      </div>
+      <p class="dim" style="font-size:12px;margin:10px 0 0;">Ordre de décision : 1) mots-clés des offres, 2) mots-clés recruteurs, 3) mots-clés candidats, 4) numéro présent dans une des bases choisies, 5) réponse par défaut (si vous en écrivez une). Une personne qui écrit « STOP » ne reçoit plus de réponse.</p>
+    </div>
+    <div class="card" id="ar_cand_card">
+      <h2>🧑‍💼 Candidats / employés</h2>
+      <label class="check-row"><input type="checkbox" id="ar_cand_on"> Répondre automatiquement aux candidats et employés</label>
+      <label>Mots-clés qui déclenchent cette réponse (séparés par des virgules)</label>
+      <textarea id="ar_cand_kw" style="min-height:70px;" placeholder="candidat, emploi, travail, inscription…"></textarea>
+      <label>Réponse envoyée</label>
+      <textarea id="ar_cand_reply" style="min-height:110px;"></textarea>
+      <label>Reconnaître aussi les numéros de cette base (même sans mot-clé)</label>
+      <select id="ar_cand_base"><option value="">— Aucune —</option></select>
+    </div>
+    <div class="card" id="ar_recr_card">
+      <h2>🏢 Recruteurs / employeurs</h2>
+      <label class="check-row"><input type="checkbox" id="ar_recr_on"> Répondre automatiquement aux recruteurs et employeurs</label>
+      <label>Mots-clés qui déclenchent cette réponse (séparés par des virgules)</label>
+      <textarea id="ar_recr_kw" style="min-height:70px;" placeholder="recruter, employeur, besoin de personnel…"></textarea>
+      <label>Réponse envoyée</label>
+      <textarea id="ar_recr_reply" style="min-height:110px;"></textarea>
+      <label>Reconnaître aussi les numéros de cette base (même sans mot-clé)</label>
+      <select id="ar_recr_base"><option value="">— Aucune —</option></select>
+    </div>
+    <div class="card" id="ar_offers_card">
+      <h2>📋 Offres d'emploi disponibles</h2>
+      <label class="check-row"><input type="checkbox" id="ar_offers_on"> Répondre avec la liste des offres quand on la demande</label>
+      <label>Mots-clés qui déclenchent la liste (séparés par des virgules)</label>
+      <textarea id="ar_offers_kw" style="min-height:70px;" placeholder="offre, offres, poste disponible…"></textarea>
+      <label>Début du message</label>
+      <input type="text" id="ar_offers_head">
+      <label>Vos offres (seules les offres cochées sont envoyées)</label>
+      <div id="arOfferList"></div>
+      <button type="button" class="btn btn-secondary btn-small" id="arOfferAdd" style="margin-top:8px;">➕ Ajouter une offre</button>
+      <label>Fin du message</label>
+      <input type="text" id="ar_offers_foot">
+      <label>Message s'il n'y a aucune offre cochée</label>
+      <textarea id="ar_offers_empty" style="min-height:60px;"></textarea>
+      <div style="height:8px"></div>
+      <button type="button" class="btn btn-secondary btn-small" id="arOfferPreview">👁 Voir le message qui sera envoyé</button>
+      <div class="ar-out" id="arOfferOut" style="display:none;"></div>
+    </div>
+    <div class="card" id="arSetCard">
+      <h2>⚙️ Réglages</h2>
+      <label>Délai avant de répondre à un même numéro (heures) — évite de répéter la même réponse</label>
+      <input type="number" id="arCooldown" min="0" max="720">
+      <label>Maximum de réponses par jour (tous numéros) — protège contre un blocage opérateur</label>
+      <input type="number" id="arMaxDay" min="1" max="2000">
+      <label>Attente avant d'envoyer la réponse (secondes, 0 à 5)</label>
+      <input type="number" id="arDelay" min="0" max="5">
+      <label class="check-row" style="margin-top:8px;"><input type="checkbox" id="arByBase"> Si le message ne contient aucun mot-clé mais que le numéro est dans une base ci-dessus, répondre quand même</label>
+      <label>Réponse par défaut (numéro inconnu et aucun mot-clé) — laissez vide pour ne rien répondre</label>
+      <textarea id="arFallback" style="min-height:80px;"></textarea>
+    </div>
+    <div class="card" id="arTestCard">
+      <h2>🧪 Tester</h2>
+      <p class="dim" style="font-size:12px;">Simule un SMS reçu : l'app indique la réponse qu'elle enverrait, sans rien envoyer.</p>
+      <label>Numéro de l'expéditeur (facultatif)</label>
+      <input type="tel" inputmode="tel" id="arTestFrom" placeholder="Ex. 0748935686">
+      <label>Message reçu</label>
+      <textarea id="arTestMsg" style="min-height:70px;" placeholder="Ex. Bonjour, je cherche un emploi"></textarea>
+      <div style="height:8px"></div>
+      <button type="button" class="btn btn-primary" id="arTestBtn">Tester</button>
+      <div class="ar-out" id="arTestOut" style="display:none;"></div>
+    </div>
+    <div class="card" id="arLogCard">
+      <h2>🕘 Dernières réponses</h2>
+      <div class="row" style="gap:6px;margin-bottom:6px;">
+        <button type="button" class="btn btn-secondary btn-small" id="arLogRefresh">🔄 Actualiser</button>
+        <button type="button" class="btn btn-danger btn-small" id="arLogClear">Vider</button>
+      </div>
+      <div id="arLogList"><div class="empty">Aucune réponse pour l'instant.</div></div>
+    </div>
+  </div>
+
   <div class="tabpanel" id="tab-scanner">
     <div class="card">
       <h2>📷 Scanner de numéros</h2>
@@ -736,12 +863,19 @@
   </div>
 
   <!-- ===================== BASES DE NUMÉROS ===================== -->
-  <div class="tabpanel" id="tab-bases">
-    <div class="hint">
+  <div class="tabpanel" id="tab-bases" data-sub="list">
+    <div class="subtabs" id="basesSubtabs">
+      <button type="button" class="active" data-sub="list" id="subBasesBtn">📚 Vos bases</button>
+      <button type="button" data-sub="create">➕ Créer</button>
+      <button type="button" data-sub="send">📤 Envoi par lots</button>
+      <button type="button" data-sub="reg">📲 Inscriptions</button>
+      <button type="button" data-sub="trash" id="subTrashBtn">🗑 Corbeille</button>
+    </div>
+    <div class="hint" data-sub-pane="list">
       Ici vous gérez des listes de <strong>numéros de téléphone seuls</strong> (pas besoin de nom), par exemple une base « Clients Abidjan » de 300 numéros. Pour l'envoi, vous choisissez une base et une taille de lot (10, 15…) : l'app vous prépare automatiquement le prochain lot de numéros à chaque fois que vous appuyez sur Envoyer, jusqu'à épuiser la base.
     </div>
 
-    <div class="card">
+    <div class="card nocc" data-sub-pane="create">
       <h2>Créer une base de numéros</h2>
       <label>Nom de la base</label>
       <input type="text" id="baseName" placeholder="Ex. Clients Abidjan">
@@ -754,18 +888,20 @@
       <button class="btn btn-primary" id="createBaseBtn">Créer la base</button>
     </div>
 
-    <div class="card">
+    <div class="card nocc" data-sub-pane="list">
       <h2>Vos bases (<span id="baseCount">0</span>)</h2>
+      <input type="text" id="baseSearch" placeholder="🔍 Rechercher une base…" style="margin-bottom:6px;">
+      <p class="dim" style="font-size:12px;margin:0 0 4px;">Touchez une base pour voir ses numéros et ses actions.</p>
       <div id="baseList"><div class="empty">Aucune base pour l'instant.</div></div>
     </div>
 
-    <div class="card">
+    <div class="card nocc" data-sub-pane="trash">
       <h2>🗑 Corbeille (<span id="trashCount">0</span>)</h2>
       <p class="dim" style="margin:0 0 8px;font-size:12px;">Une base supprimée reste ici <strong>7 jours</strong> et peut être restaurée en un clic, au cas où « Suppr. » aurait été touché par erreur.</p>
       <div id="trashList"><div class="empty">Corbeille vide.</div></div>
     </div>
 
-    <div class="card">
+    <div class="card nocc" data-sub-pane="send">
       <h2>Envoi par lots depuis une base</h2>
       <label>Base à utiliser</label>
       <select id="baseSendSelect"><option value="">— Choisir une base —</option></select>
@@ -782,8 +918,8 @@
         <button class="btn btn-danger btn-small" id="resetBaseSendBtn" style="flex:0 0 auto;">Recommencer</button>
       </div>
     </div>
-    <div id="baseCurrentBatch"></div>
-    <div class="hint">⚠️ Si l'envoi échoue ou ne part pas : sur Android, envoyer à plusieurs numéros d'un coup passe souvent en « message de groupe » (MMS), qui a besoin d'internet actif. Dans les réglages de votre appli SMS, désactivez « Messagerie de groupe » (ou choisissez « Envoyer individuellement ») pour un envoi fiable. En cas de doute, mettez la taille du lot à 1 pour tester en SMS classique.</div>
+    <div id="baseCurrentBatch" data-sub-pane="send"></div>
+    <div class="hint" data-sub-pane="send">⚠️ Si l'envoi échoue ou ne part pas : sur Android, envoyer à plusieurs numéros d'un coup passe souvent en « message de groupe » (MMS), qui a besoin d'internet actif. Dans les réglages de votre appli SMS, désactivez « Messagerie de groupe » (ou choisissez « Envoyer individuellement ») pour un envoi fiable. En cas de doute, mettez la taille du lot à 1 pour tester en SMS classique.</div>
   </div>
 
   <footer>SHAMAN PRODUCTION — outil interne d'envoi groupé</footer>
@@ -803,6 +939,7 @@ function saveDB(){
   localStorage.setItem(DB_KEY, JSON.stringify(db));
   scheduleSyncPush();
   if(typeof pushSkipToNative === 'function') pushSkipToNative(false);
+  if(typeof arPush === 'function') arPush(false);
 }
 let db = loadDB();
 if(!db.scheduled) db.scheduled = [];
@@ -1077,6 +1214,7 @@ function mergeDb(local, remote){
     robotRules: mergeNewest(local.robotRules, remote.robotRules, tombstones.robotRules),
     robotSettings: ((remote.robotSettings||{}).updatedAt||0) > ((local.robotSettings||{}).updatedAt||0) ? remote.robotSettings : local.robotSettings,
     scanSettings: ((remote.scanSettings||{}).updatedAt||0) > ((local.scanSettings||{}).updatedAt||0) ? remote.scanSettings : local.scanSettings,
+    autoReply: ((remote.autoReply||{}).updatedAt||0) > ((local.autoReply||{}).updatedAt||0) ? remote.autoReply : local.autoReply,
     robotJobs: mergeNewest(local.robotJobs, remote.robotJobs).filter(j => j.at > Date.now() - 14*864e5),
     tombstones,
     _syncedAt: Date.now()
@@ -1094,6 +1232,7 @@ function refreshEverything(){
   renderSchedList();
   document.getElementById('smsBatches').innerHTML = '';
   document.getElementById('mailBatches').innerHTML = '';
+  if(typeof arAfterSync === 'function') arAfterSync();
 }
 
 // Synchronisation complète : récupère le cloud, fusionne avec les données
@@ -1544,7 +1683,7 @@ smsBody.addEventListener('input', () => {
    Dans l'APK, window.ShamanNative existe : les SMS partent directement,
    sans ouvrir l'appli SMS, avec choix automatique de la SIM. */
 const NATIVE = !!window.ShamanNative;
-const APP_VERSION = '1.18';
+const APP_VERSION = '1.19';
 const nativeCbs = {};
 window.onShamanSms = function(json){
   try{ const e = JSON.parse(json); const cb = nativeCbs[e.id]; if(cb) cb(e); if(e.type === 'done') delete nativeCbs[e.id]; }catch(err){}
@@ -1995,7 +2134,7 @@ function importInbox(baseId){
       res.items.forEach(m => {
         const t = (m.b || '').toUpperCase(); if(only && words.length && !words.some(w => t.includes(w))) return;
         items.push({ raw: m.a, label: (m.b || '').replace(/\s+/g, ' ').slice(0, 90) });
-        if(only){ const ph = normCI(m.a); if(ph && ph.num && regAdd({ id: 's:' + m.a + ':' + m.d, ts: (m.d || 0) * 1000 || Date.now(), src: 'sms', camp: regCampOf(m.b), phone: ph.num, f: regParseBody(m.b) })) reg++; }
+        if(only){ const ph = normCI(m.a); if(ph && ph.num){ const rec = { id: 's:' + m.a + ':' + m.d, ts: (m.d || 0) * 1000 || Date.now(), src: 'sms', camp: regCampOf(m.b), phone: ph.num, f: regParseBody(m.b) }; if(regAdd(rec)){ reg++; regAutoBase(rec); } } }
       });
       if(reg) alert(reg + ' inscription(s) ajoutée(s) au registre (Bases → carte « Inscription avec accord »).');
       importReview(baseId, '💬 SMS reçus', items);
@@ -2078,7 +2217,7 @@ function importClean(baseId){
     alert(removed + ' numéro(s) retiré(s) de « ' + b.name + ' »' + (removedOthers ? ' · ' + removedOthers + ' retiré(s) des autres bases' : '') + '. Il reste ' + b.numbers.length + ' numéros.');
   });
 }
-function importQr(){ const c = document.getElementById('qrRegCard'); if(c) c.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+function importQr(){ setBasesSub('reg'); const c = document.getElementById('qrRegCard'); if(c) c.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
 
 /* ---- Inscription avec accord : QR hors ligne (SMS complet), formulaire en ligne chiffré, registre ---- */
 const QR_LIST_KEY = 'shaman_qr_list', QR_SITE_KEY = 'shaman_site_url', REG_KEY = 'shaman_reg', ECDH_KEY = 'shaman_ecdh', INSC_PATH = 'sms-app/inscriptions';
@@ -2199,7 +2338,7 @@ function regCampOf(text){
   return best ? best.name : '';
 }
 async function insFetch(){
-  const camps = qrListGet().filter(c => c.token), out = { got: 0, unreadable: 0, errors: 0, lastErr: '' };
+  const camps = qrListGet().filter(c => c.token), out = { got: 0, added: 0, unreadable: 0, errors: 0, lastErr: '' };
   if(!camps.length) return out;
   const keys = await ecdhKeys();
   for(const c of camps){
@@ -2212,7 +2351,8 @@ async function insFetch(){
       try{
         const o = await insDecrypt(keys.priv, sub);
         const ph = normCI(o.phone || '');
-        regAdd({ id: 'i:' + c.token + ':' + id, ts: o.ts || sub.ts || Date.now(), src: 'internet', camp: c.name, phone: ph && ph.num ? ph.num : String(o.phone || ''), f: o.f || {} });
+        const rec = { id: 'i:' + c.token + ':' + id, ts: o.ts || sub.ts || Date.now(), src: 'internet', camp: c.name, phone: ph && ph.num ? ph.num : String(o.phone || ''), f: o.f || {} };
+        if(regAdd(rec)) out.added = (out.added || 0) + regAutoBase(rec);
         out.got++;
         try{ await fetch(`${SYNC_DB_URL}/${INSC_PATH}/${encodeURIComponent(c.token)}/${encodeURIComponent(id)}.json`, { method: 'DELETE' }); }catch(e){}   // effacé du serveur une fois lu
       }catch(e){ out.unreadable++; }
@@ -2275,7 +2415,7 @@ async function qrEditSave(c, body){
   if(!n || n.kind !== 'mobile'){ alert('Indiquez un numéro mobile valide (10 chiffres, ex. 0748935686).'); return; }
   const nc = { id: c.id || ('q' + Date.now()), name, num, kw: (body.querySelector('#qeKw').value.trim() || qrKwFrom(name)).toUpperCase().replace(/\s+/g, '-'), type: body.querySelector('#qeType').value, mode: body.querySelector('#qeMode').value,
     fields: body.querySelector('#qeFields').value.split(',').map(x => x.trim()).filter(Boolean).join(','), title: body.querySelector('#qeTitle').value.trim(), sub: body.querySelector('#qeSub').value.trim(), agency: body.querySelector('#qeAgency').value.trim(),
-    token: c.token || rndToken(), pk: '' };
+    token: c.token || rndToken(), pk: '', base: (body.querySelector('#qeBase') || {}).value || '' };
   try{ nc.pk = (await ecdhKeys()).pub; }catch(e){ nc.pk = ''; }
   let worst = 0;
   try{ qrItems(nc).forEach(it => { worst = Math.max(worst, QRGen.make(it.url).version); }); }
@@ -2298,6 +2438,10 @@ function qrEdit(id){
       <option value="form" ${m === 'form' ? 'selected' : ''}>🌐 En ligne : formulaire (SMS ou internet)</option>
       <option value="both" ${m === 'both' ? 'selected' : ''}>📴+🌐 Les deux sur la même affiche (recommandé)</option></select>
     <label>Informations demandées (séparées par des virgules, autant que vous voulez)</label><input type="text" id="qeFields" value="${escapeHtml(c.fields)}">
+    <label>Ajouter automatiquement les inscrits à la base</label><select id="qeBase">
+      <option value="" ${!c.base ? 'selected' : ''}>— Aucune (je les ajoute moi-même depuis le registre) —</option>
+      <option value="__new__" ${c.base === '__new__' ? 'selected' : ''}>➕ Créer automatiquement une base « Inscrits » pour ce QR</option>
+      ${db.phoneBases.map(b => `<option value="${b.id}" ${c.base === b.id ? 'selected' : ''}>${escapeHtml(b.name)} (${b.numbers.length})</option>`).join('')}</select>
     <label>Titre</label><input type="text" id="qeTitle" value="${escapeHtml(c.title)}">
     <label>Sous-titre</label><input type="text" id="qeSub" value="${escapeHtml(c.sub)}">
     <label>Nom de votre agence (affiché sur le formulaire)</label><input type="text" id="qeAgency" value="${escapeHtml(c.agency)}">
@@ -2314,6 +2458,10 @@ function qrShow(id){
     ${items.map(it => `<div style="font-size:12.5px;margin-top:6px;font-weight:700;">${escapeHtml(it.label)}</div><textarea readonly style="min-height:70px;font-size:12.5px;">${escapeHtml(it.url)}</textarea>`).join('')}
     <div style="font-size:13px;margin:12px 0 4px;font-weight:700;">📨 Modèle de SMS à envoyer aux personnes (elles répondent en le complétant)</div>
     <textarea id="qsTpl" readonly style="min-height:120px;">${escapeHtml(((c.agency ? c.agency + ' : pour vous inscrire, répondez à ce SMS en complétant chaque ligne.\n\n' : 'Pour vous inscrire, répondez à ce SMS en complétant chaque ligne.\n\n')) + qrSmsBody(c))}</textarea>
+    ${qrFormLink(c) ? `<div style="font-size:13px;margin:12px 0 4px;font-weight:700;">🔗 Modèle avec le lien du formulaire (si le SMS à compléter ne s'ouvre pas chez la personne)</div>
+    <textarea id="qsTplLink" readonly style="min-height:90px;">${escapeHtml(qrLinkTemplate(c))}</textarea>
+    <p class="dim" style="font-size:12px;margin:4px 0 0;">La personne touche le lien, remplit le formulaire et l'envoie : ses informations et son numéro arrivent dans votre registre et dans la base choisie pour ce QR.</p>
+    <button type="button" class="btn btn-secondary btn-small" id="qsLinkUse" style="margin-top:6px;width:100%;">🔗 Utiliser ce modèle dans l'onglet SMS</button>` : ''}
     <div class="row" style="gap:8px;margin-top:8px;flex-wrap:wrap;">
       <button type="button" class="btn btn-primary btn-small" id="qsShareLink" style="flex:1 1 45%;">🔗 Partager les liens</button>
       <button type="button" class="btn btn-secondary btn-small" id="qsCopy" style="flex:1 1 45%;">📋 Copier les liens</button>
@@ -2323,12 +2471,8 @@ function qrShow(id){
   body.querySelector('#qsShareLink').addEventListener('click', () => shareTextNow(qrInviteText(c)));
   body.querySelector('#qsCopy').addEventListener('click', e => copyToClipboard(qrInviteText(c), e.target));
   body.querySelector('#qsImg').addEventListener('click', () => qrShareImage(poster));
-  body.querySelector('#qsTplUse').addEventListener('click', () => {
-    const ta = document.getElementById('smsBody'); if(!ta) return;
-    ta.value = body.querySelector('#qsTpl').value; ta.dispatchEvent(new Event('input')); sheetClose();
-    const t = document.querySelector('[data-tab="sms"]'); if(t) t.click();
-    alert("Le modèle est dans l'onglet SMS : choisissez vos destinataires puis envoyez. Chaque personne répond en complétant les lignes.");
-  });
+  body.querySelector('#qsTplUse').addEventListener('click', () => qrTplUse(body.querySelector('#qsTpl').value));
+  const lu = body.querySelector('#qsLinkUse'); if(lu) lu.addEventListener('click', () => qrTplUse(body.querySelector('#qsTplLink').value));
 }
 function renderQrCard(){
   const c = document.getElementById('qrRegCard'); if(!c) return;
@@ -2352,6 +2496,7 @@ function renderQrCard(){
       <button type="button" class="btn btn-secondary btn-small" id="insReg" style="flex:1 1 45%;">📒 Registre (${regN})</button>
       <button type="button" class="btn btn-secondary btn-small" id="insTest" style="flex:1 1 45%;">🔌 Tester la connexion</button></div>
     <div id="insMsg" style="font-size:13px;font-weight:700;margin-top:8px;min-height:18px;"></div>
+    <p class="dim">🔄 Les inscriptions par internet sont récupérées automatiquement à l'ouverture de l'application puis toutes les 90 secondes, et ajoutées à la base choisie pour chaque QR.</p>
     <p class="dim">Les inscriptions par SMS se récupèrent avec « + Ajouter des numéros → 💬 SMS reçus » (Android) et vont aussi dans le registre.</p>`;
   const msg = t => { const e = c.querySelector('#insMsg'); if(e) e.textContent = t; };
   c.querySelector('#qrSite').addEventListener('change', e => { const u = qrSiteNorm(e.target.value); try{ localStorage.setItem(QR_SITE_KEY, u); }catch(err){} e.target.value = u; });
@@ -2362,7 +2507,7 @@ function renderQrCard(){
     msg('Recherche des inscriptions…');
     try{
       const r = await insFetch();
-      msg((r.errors ? `⚠️ ${r.errors} QR non lu(s) (${r.lastErr}). ` : '') + `✅ ${r.got} nouvelle(s) inscription(s) reçue(s)` + (r.unreadable ? ` · ${r.unreadable} illisible(s) sur ce téléphone` : '') + '.');
+      msg((r.errors ? `⚠️ ${r.errors} QR non lu(s) (${r.lastErr}). ` : '') + `✅ ${r.got} nouvelle(s) inscription(s) reçue(s)` + (r.added ? ` · ${r.added} numéro(s) ajouté(s) à la base` : '') + (r.unreadable ? ` · ${r.unreadable} illisible(s) sur ce téléphone` : '') + '.');
       c.querySelector('#insReg').textContent = `📒 Registre (${regGet().length})`;
     }catch(e){ msg('❌ ' + (e && e.message || e)); }
   });
@@ -2373,7 +2518,7 @@ function renderQrCard(){
 function initQrCard(){
   const tab = document.getElementById('tab-bases');
   if(!tab || document.getElementById('qrRegCard')) return;
-  const c = document.createElement('div'); c.className = 'card'; c.id = 'qrRegCard'; tab.appendChild(c); renderQrCard();
+  const c = document.createElement('div'); c.className = 'card nocc'; c.id = 'qrRegCard'; c.setAttribute('data-sub-pane', 'reg'); tab.appendChild(c); renderQrCard();
 }
 if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initQrCard); else initQrCard();
 
@@ -2560,9 +2705,11 @@ const smsSourceRadios = () => Array.from(document.querySelectorAll('input[name="
 function getSmsSource(){ const c = smsSourceRadios().find(r => r.checked); return c ? c.value : 'contacts'; }
 function updateSmsSourceUI(){
   const source = getSmsSource();
-  document.getElementById('smsRecipientPicker').style.display = source === 'numbers' ? 'none' : 'block';
+  document.getElementById('smsRecipientPicker').style.display = source === 'contacts' ? 'block' : 'none';
   document.getElementById('smsNumbersWrap').style.display = source === 'numbers' ? 'block' : 'none';
+  document.getElementById('smsBaseWrap').style.display = source === 'base' ? 'block' : 'none';
   if(source === 'numbers') document.getElementById('smsNumbersDial').innerHTML = document.getElementById('cCountry').innerHTML;
+  if(source === 'base'){ refreshSmsBaseSelect(); updateSmsBaseInfo(); }
 }
 smsSourceRadios().forEach(r => r.addEventListener('change', updateSmsSourceUI));
 
@@ -2572,13 +2719,28 @@ document.getElementById('buildSmsBatches').addEventListener('click', () => {
   const batchSize = Math.max(1, parseInt(document.getElementById('smsBatchSize').value) || 15);
   if(!body){ alert('Écrivez un message.'); return; }
 
-  let recipients;
+  let recipients, baseCtx = null;
   if(source === 'numbers'){
     const dial = document.getElementById('smsNumbersDial').value;
     const raw = document.getElementById('smsNumbersInput').value.split(/[\n,;]+/).map(x => x.trim()).filter(Boolean);
     const phones = [...new Set(raw.map(n => normalizePhone(n, dial)).filter(n => n && !isBlocked(n)))];
     if(!phones.length){ alert('Saisissez au moins un numéro valide.'); return; }
     recipients = phones.map(p => ({ phone: p }));
+  } else if(source === 'base'){
+    const b = baseById(document.getElementById('smsBaseSelect').value);
+    if(!b){ alert('Choisissez une base.'); return; }
+    const removed = stripBlockedFromBase(b);
+    if(removed){ saveDB(); updateBaseMeta(b.id); }
+    const modeEl = document.querySelector('input[name="smsBaseMode"]:checked');
+    const rest = !modeEl || modeEl.value !== 'all';
+    const from = rest ? Math.min(b.cursor || 0, b.numbers.length) : 0;
+    const nums = b.numbers.slice(from).filter(n => n && !isBlocked(n) && !isSkip(n));
+    if(!nums.length){
+      alert(rest && b.numbers.length ? "Tous les numéros de cette base ont déjà été traités. Choisissez « Toute la base », ou réinitialisez l'envoi (Bases SMS → Vos bases → la base → « Réinitialiser l'envoi »)." : 'Cette base est vide.');
+      return;
+    }
+    recipients = nums.map(p => ({ phone: p }));
+    baseCtx = { id: b.id, rest };
   } else {
     recipients = getSelected('smsRecipientPicker');
     if(!recipients.length){ alert('Sélectionnez au moins un destinataire.'); return; }
@@ -2592,6 +2754,7 @@ document.getElementById('buildSmsBatches').addEventListener('click', () => {
     const numbers = batch.map(c => c.phone.replace(/\s+/g,'')).join(sep || ',');
     return `sms:${numbers}?body=${encodeURIComponent(body)}`;
   }, 'sms', (() => { const st = simSeq(); simAdvance(batches.length); return i => simLabelAt(st + i); })());
+  smsBaseProgress(baseCtx, batches);
 });
 
 /* ================= EMAIL ================= */
@@ -3996,15 +4159,25 @@ document.getElementById('createBaseBtn').addEventListener('click', () => {
   }, 50);
 });
 
+var baseOpenSet = new Set();
 function renderBasesList(){
   const el = document.getElementById('baseList');
   document.getElementById('baseCount').textContent = db.phoneBases.length;
-  if(!db.phoneBases.length){ el.innerHTML = '<div class="empty">Aucune base pour l\'instant.</div>'; return; }
+  const sb = document.getElementById('subBasesBtn'); if(sb) sb.textContent = '📚 Vos bases (' + db.phoneBases.length + ')';
+  if(!db.phoneBases.length){ el.innerHTML = '<div class="empty">Aucune base pour l\'instant. Créez-en une dans l\'onglet « ➕ Créer ».</div>'; renderTrashList(); return; }
+  const qEl = document.getElementById('baseSearch');
+  const q = qEl ? qEl.value.trim().toLowerCase() : '';
+  const shown = q ? db.phoneBases.filter(b => String(b.name).toLowerCase().includes(q)) : db.phoneBases;
+  if(!shown.length){ el.innerHTML = '<div class="empty">Aucune base ne correspond à cette recherche.</div>'; renderTrashList(); return; }
 
-  el.innerHTML = db.phoneBases.map(b => {
-    return `<div class="group-item" id="base-${b.id}">      <div class="name">${escapeHtml(b.name)} <button class="btn btn-secondary btn-small" data-rename-base="${b.id}" style="padding:2px 8px;font-size:11px;">✏️</button></div>
-      <div class="meta" id="base-meta-${b.id}">${baseMetaHtml(b)}</div>
-      <div class="row" style="margin-top:8px;gap:6px;flex-wrap:wrap;">
+  el.innerHTML = shown.map(b => {
+    const open = baseOpenSet.has(b.id);
+    return `<div class="group-item base-row${open ? ' open' : ''}" id="base-${b.id}">
+      <div class="base-head" data-base-toggle="${b.id}"><div class="bh-main"><div class="name">${escapeHtml(b.name)}</div>
+      <div class="meta" id="base-meta-${b.id}">${baseMetaHtml(b)}</div></div><span class="chev">▾</span></div>
+      <div class="base-body" style="display:${open ? 'block' : 'none'};">
+      <div class="row" style="margin-top:2px;gap:6px;flex-wrap:wrap;">
+        <button class="btn btn-secondary btn-small" data-rename-base="${b.id}">✏️ Renommer</button>
         <button class="btn btn-secondary btn-small" data-view-numbers="${b.id}">👁 Voir les numéros</button>
         <button class="btn btn-secondary btn-small" data-add-numbers="${b.id}">+ Ajouter des numéros</button>
         <button class="btn btn-secondary btn-small" data-copy-base="${b.id}">📋 Copier tout</button>
@@ -4033,9 +4206,19 @@ function renderBasesList(){
           <button class="btn btn-secondary btn-small" data-imp="qr" data-base="${b.id}" style="flex:1 1 45%;">📲 QR d'inscription</button>
         </div>
       </div>
+      </div>
     </div>`;
   }).join('');
 
+  el.querySelectorAll('[data-base-toggle]').forEach(h => {
+    h.addEventListener('click', () => {
+      const row = h.closest('.base-row'), body = row.querySelector('.base-body');
+      const willOpen = body.style.display === 'none';
+      body.style.display = willOpen ? 'block' : 'none';
+      row.classList.toggle('open', willOpen);
+      if(willOpen) baseOpenSet.add(h.dataset.baseToggle); else baseOpenSet.delete(h.dataset.baseToggle);
+    });
+  });
   el.querySelectorAll('[data-rename-base]').forEach(btn => {
     btn.addEventListener('click', () => {
       const b = db.phoneBases.find(x => x.id === btn.dataset.renameBase);
@@ -4296,6 +4479,8 @@ function refreshBaseSendSelect(){
     db.phoneBases.map(b => `<option value="${b.id}">${escapeHtml(b.name)} (${b.numbers.length})</option>`).join('');
   if(db.phoneBases.some(b => b.id === current)) sel.value = current;
   updateBaseSendInfo();
+  if(typeof refreshSmsBaseSelect === 'function') refreshSmsBaseSelect();
+  if(typeof arFillBases === 'function') arFillBases();
 }
 
 function updateBaseSendInfo(){
@@ -4430,6 +4615,373 @@ document.getElementById('resetBaseSendBtn').addEventListener('click', () => {
   const code = getSyncCode();
   if(code && isAutoSyncOn()) syncNow(code);
 });
+
+/* ================= NOUVEAUTÉS v1.19 =================
+   1) Réponses automatiques aux SMS reçus (candidats, recruteurs, offres)
+   2) SMS : envoyer à une base de numéros, avec un modèle
+   3) Bases SMS : sous-onglets + liste des bases cliquable ; cartes repliables partout
+   4) Inscriptions par formulaire : récupération automatique + ajout au registre et à une base */
+
+function byId(id){ return document.getElementById(id); }
+function toast(t){
+  let e = byId('toast');
+  if(!e){ e = document.createElement('div'); e.id = 'toast'; document.body.appendChild(e); }
+  e.textContent = t; e.classList.add('show');
+  clearTimeout(toast._t); toast._t = setTimeout(() => e.classList.remove('show'), 4200);
+}
+
+/* ---------- Cartes repliables (toutes les rubriques) ---------- */
+const CC_KEY = 'shaman_cc_state';
+// Rubriques repliées au premier lancement (listes et réglages) ; chaque choix est ensuite mémorisé.
+const CC_COLLAPSED_DEFAULT = /(installer|synchronisation|sauvegarde|créer un groupe|cartes sim|taille des lots|réglages|derniers envois|tableau du robot|rappels enregistrés|numéros bloqués|vos contacts|dernières réponses|tester|candidats|recruteurs|offres d)/i;
+function ccState(){ try{ return JSON.parse(localStorage.getItem(CC_KEY) || '{}') || {}; }catch(e){ return {}; } }
+function ccKey(card){
+  const h = card.querySelector(':scope > h2'); if(!h) return '';
+  const panel = card.closest('.tabpanel');
+  return (panel ? panel.id : 'top') + '|' + h.textContent.replace(/\(.*?\)/g, '').replace(/[0-9]+/g, '').replace(/\s+/g, ' ').trim();
+}
+function ccEnhance(card){
+  if(!card || card.classList.contains('cc') || card.classList.contains('nocc')) return;
+  if(card.closest('#importSheet')) return;
+  const h = card.querySelector(':scope > h2'); if(!h) return;
+  card.classList.add('cc');
+  const k = ccKey(card), st = ccState();
+  const collapsed = k in st ? !!st[k] : CC_COLLAPSED_DEFAULT.test(h.textContent);
+  if(collapsed) card.classList.add('collapsed');
+}
+function ccScan(root){ (root || document).querySelectorAll('.card').forEach(ccEnhance); }
+document.addEventListener('click', e => {
+  const h = e.target.closest ? e.target.closest('.card.cc > h2') : null;
+  if(!h) return;
+  const card = h.parentElement;
+  card.classList.toggle('collapsed');
+  const st = ccState(); st[ccKey(card)] = card.classList.contains('collapsed') ? 1 : 0;
+  try{ localStorage.setItem(CC_KEY, JSON.stringify(st)); }catch(err){}
+});
+ccScan();
+try{
+  new MutationObserver(muts => {
+    muts.forEach(m => m.addedNodes.forEach(n => {
+      if(n.nodeType !== 1) return;
+      if(n.classList && n.classList.contains('card')) ccEnhance(n);
+      if(n.querySelectorAll) n.querySelectorAll('.card').forEach(ccEnhance);
+    }));
+  }).observe(document.body, { childList: true, subtree: true });
+}catch(e){}
+
+/* ---------- Bases SMS : sous-onglets ---------- */
+function setBasesSub(name){
+  const tab = byId('tab-bases'); if(!tab) return;
+  tab.dataset.sub = name;
+  document.querySelectorAll('#basesSubtabs button').forEach(b => b.classList.toggle('active', b.dataset.sub === name));
+}
+document.querySelectorAll('#basesSubtabs button').forEach(b => b.addEventListener('click', () => {
+  setBasesSub(b.dataset.sub);
+  if(b.dataset.sub === 'send'){ refreshBaseSendSelect(); renderCurrentBaseBatch(); }
+  if(b.dataset.sub === 'list') renderBasesList();
+  if(b.dataset.sub === 'trash') renderTrashList();
+}));
+byId('baseSearch').addEventListener('input', () => renderBasesList());
+// Après la création d'une base : on revient sur « Vos bases » pour la voir tout de suite.
+byId('createBaseBtn').addEventListener('click', () => { const n0 = db.phoneBases.length; setTimeout(() => { if(db.phoneBases.length > n0) setBasesSub('list'); }, 120); });
+
+/* ---------- SMS : base de numéros comme destinataire ---------- */
+function refreshSmsBaseSelect(){
+  const sel = byId('smsBaseSelect'); if(!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">— Choisir une base —</option>' + db.phoneBases.map(b => `<option value="${b.id}">${escapeHtml(b.name)} (${b.numbers.length})</option>`).join('');
+  if(db.phoneBases.some(b => b.id === cur)) sel.value = cur;
+  updateSmsBaseInfo();
+}
+function updateSmsBaseInfo(){
+  const info = byId('smsBaseInfo'); if(!info) return;
+  const b = baseById(byId('smsBaseSelect').value);
+  if(!b){ info.textContent = ''; return; }
+  const left = b.numbers.length - (b.cursor || 0);
+  info.textContent = `${b.numbers.length} numéros au total · ${b.cursor || 0} déjà traités · ${left} restants`;
+}
+byId('smsBaseSelect').addEventListener('change', updateSmsBaseInfo);
+// La progression de la base avance quand un lot est marqué « ✓ Envoyé » (mode « pas encore traités »).
+function smsBaseProgress(ctx, batches){
+  if(!ctx || !ctx.rest) return;
+  batches.forEach((batch, i) => {
+    const btn = document.querySelector(`#smsBatches [data-mark="${i}"]`); if(!btn) return;
+    btn.addEventListener('click', () => {
+      const b = baseById(ctx.id); if(!b || !batch.length) return;
+      const idx = b.numbers.indexOf(String(batch[batch.length - 1].phone));
+      if(idx < 0 || idx + 1 <= (b.cursor || 0)) return;
+      b.cursor = idx + 1; delete b.pendingBatch; b.updatedAt = Date.now();
+      saveDB(); updateBaseMeta(b.id); updateBaseSendInfo(); updateSmsBaseInfo(); renderCurrentBaseBatch();
+    });
+  });
+}
+
+/* ---------- Modèles d'inscription (QR) utilisables dans l'onglet SMS ---------- */
+function qrSmsTemplate(c){
+  return (c.agency ? c.agency + ' : pour vous inscrire, répondez à ce SMS en complétant chaque ligne.\n\n' : 'Pour vous inscrire, répondez à ce SMS en complétant chaque ligne.\n\n') + qrSmsBody(c);
+}
+function qrLinkTemplate(c){
+  const f = qrFormLink(c); if(!f) return '';
+  return (c.agency ? c.agency + ' : ' : '') + 'pour vous inscrire, remplissez ce formulaire (1 minute) : ' + f;
+}
+function qrTplUse(text){
+  const ta = byId('smsBody'); if(!ta) return;
+  ta.value = text; ta.dispatchEvent(new Event('input')); sheetClose();
+  const t = document.querySelector('[data-tab="sms"]'); if(t) t.click();
+  const r = document.querySelector('input[name="smsSource"][value="base"]');
+  if(r){ r.checked = true; updateSmsSourceUI(); }
+  toast('Modèle inséré : choisissez la base destinataire, puis « Préparer les envois ».');
+}
+function refreshSmsTplSelect(){
+  const sel = byId('smsTplSelect'); if(!sel) return;
+  let h = '<option value="">— Insérer un modèle —</option>';
+  qrListGet().forEach(c => {
+    h += `<option value="${escapeHtml(c.id)}|sms">📨 ${escapeHtml(c.name)} — SMS à compléter</option>`;
+    if(qrFormLink(c)) h += `<option value="${escapeHtml(c.id)}|form">🔗 ${escapeHtml(c.name)} — lien du formulaire</option>`;
+  });
+  sel.innerHTML = h;
+}
+byId('smsTplSelect').addEventListener('change', e => {
+  const v = e.target.value; if(!v) return;
+  const [id, kind] = v.split('|'), c = qrListGet().find(x => x.id === id);
+  if(c){ const ta = byId('smsBody'); ta.value = kind === 'form' ? qrLinkTemplate(c) : qrSmsTemplate(c); ta.dispatchEvent(new Event('input')); }
+  e.target.value = '';
+});
+document.querySelector('[data-tab="sms"]').addEventListener('click', refreshSmsTplSelect);
+refreshSmsTplSelect();
+refreshSmsBaseSelect();
+
+/* ---------- Inscriptions : ajout automatique au registre ET à une base ---------- */
+function regAutoBase(rec){
+  try{
+    if(!rec || !rec.phone) return 0;
+    const list = qrListGet(), c = list.find(x => x.name === rec.camp);
+    if(!c || !c.base) return 0;
+    let b = null;
+    if(c.base === '__new__'){
+      b = { id: 'b' + Date.now() + Math.random().toString(36).slice(2, 7), name: 'Inscrits – ' + c.name, numbers: [], cursor: 0, defaultDial: '225', updatedAt: Date.now() };
+      db.phoneBases.push(b); saveDB();
+      c.base = b.id; qrListSet(list);
+    } else {
+      b = baseById(c.base);
+    }
+    if(!b) return 0;
+    const r = addNumbersToBase(b.id, rec.phone);
+    return r.added || 0;
+  }catch(e){ return 0; }
+}
+var insBusy = false;
+async function insAuto(){
+  if(insBusy || !navigator.onLine) return;
+  if(!qrListGet().some(c => c.token)) return;
+  insBusy = true;
+  try{
+    const r = await insFetch();
+    if(r.got > 0){
+      toast(`📥 ${r.got} nouvelle(s) inscription(s) reçue(s)` + (r.added ? ` · ${r.added} numéro(s) ajouté(s) à la base` : ''));
+      const b = byId('insReg'); if(b) b.textContent = `📒 Registre (${regGet().length})`;
+      renderBasesList(); refreshBaseSendSelect();
+    }
+  }catch(e){} finally { insBusy = false; }
+}
+setTimeout(insAuto, 4000);
+setInterval(() => { if(document.visibilityState === 'visible') insAuto(); }, 90000);
+document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible') setTimeout(insAuto, 1500); });
+
+/* ---------- Réponses automatiques ---------- */
+const AR_ENABLED_KEY = 'shaman_ar_enabled';
+const AR_LABELS = { cand: 'Candidats / employés', recr: 'Recruteurs / employeurs', offers: 'Offres disponibles', fallback: 'Réponse par défaut', stop: 'Arrêt demandé' };
+const AR_DEFAULT = {
+  updatedAt: 1, cooldownH: 12, maxPerDay: 150, delaySec: 2, byBase: true, fallback: '',
+  cand: { on: true, base: '', kw: "candidat, emploi, travail, job, stage, inscription, inscrire, cv, chercher du travail",
+    reply: "Bonjour, merci pour votre message. Pour vous inscrire comme candidat, envoyez-nous votre nom, votre métier et votre quartier par SMS. Notre équipe vous recontacte rapidement. Pour voir les offres actuelles, écrivez OFFRES." },
+  recr: { on: true, base: '', kw: "recruter, recrutement, employeur, embaucher, main d'oeuvre, besoin de personnel, besoin d'un employe, besoin d'une employee, mon entreprise, ma societe",
+    reply: "Bonjour, merci de contacter notre agence. Pour votre recrutement, indiquez-nous le poste recherché, le lieu et la date de démarrage. Un conseiller vous rappelle rapidement." },
+  offers: { on: true, kw: "offre, offres, poste disponible, postes disponibles, poste a pourvoir, vous recrutez, quels emplois, liste des emplois",
+    head: "Offres disponibles :", foot: "Pour postuler, répondez avec votre nom et le numéro de l'offre.",
+    empty: "Aucune offre disponible pour le moment. Nous vous écrirons dès qu'il y en a.", items: [] }
+};
+function arGet(){
+  if(!db.autoReply) db.autoReply = JSON.parse(JSON.stringify(AR_DEFAULT));
+  const c = db.autoReply;
+  ['cand', 'recr', 'offers'].forEach(k => { if(!c[k]) c[k] = JSON.parse(JSON.stringify(AR_DEFAULT[k])); });
+  if(!Array.isArray(c.offers.items)) c.offers.items = [];
+  return c;
+}
+function arEnabled(){ try{ return localStorage.getItem(AR_ENABLED_KEY) === '1'; }catch(e){ return false; } }
+function arKw(t){ return String(t || '').split(/[,;\n]+/).map(x => x.trim()).filter(Boolean); }
+function arNum(v, d, lo, hi){ const n = parseInt(v, 10); return isNaN(n) ? d : Math.max(lo, Math.min(hi, n)); }
+function arPayload(){
+  const c = arGet();
+  const numsOf = id => { const b = id ? baseById(id) : null; return b ? b.numbers.slice() : []; };
+  return {
+    enabled: arEnabled(),
+    cooldownH: arNum(c.cooldownH, 12, 0, 720), maxPerDay: arNum(c.maxPerDay, 150, 1, 2000), delaySec: arNum(c.delaySec, 2, 0, 5),
+    byBase: c.byBase !== false, fallback: String(c.fallback || ''),
+    cand: { on: c.cand.on !== false, kw: arKw(c.cand.kw), reply: String(c.cand.reply || ''), nums: numsOf(c.cand.base) },
+    recr: { on: c.recr.on !== false, kw: arKw(c.recr.kw), reply: String(c.recr.reply || ''), nums: numsOf(c.recr.base) },
+    offers: { on: c.offers.on !== false, kw: arKw(c.offers.kw), head: String(c.offers.head || ''), foot: String(c.offers.foot || ''), empty: String(c.offers.empty || ''), maxLen: 480,
+      items: c.offers.items.map(x => ({ t: String(x.t || ''), d: String(x.d || ''), on: x.on !== false })) },
+    blocked: db.blockedNumbers.map(b => b.number)
+  };
+}
+var arLastPushed = '', arPushTimer = null;
+function arPush(force){
+  if(!NATIVE) return;
+  clearTimeout(arPushTimer);
+  arPushTimer = setTimeout(() => {
+    try{
+      const js = JSON.stringify(arPayload());
+      if(!force && js === arLastPushed) return;
+      if(ShamanNative.setAutoReply(js) === 'ok') arLastPushed = js;
+    }catch(e){}
+  }, force ? 0 : 1500);
+}
+let arSaveTimer = null;
+function arSaveSoon(){
+  clearTimeout(arSaveTimer);
+  arSaveTimer = setTimeout(() => { arGet().updatedAt = Date.now(); saveDB(); }, 500);
+}
+function arFillBases(){
+  ['cand', 'recr'].forEach(k => {
+    const sel = byId('ar_' + k + '_base'); if(!sel) return;
+    sel.innerHTML = '<option value="">— Aucune —</option>' + db.phoneBases.map(b => `<option value="${b.id}">${escapeHtml(b.name)} (${b.numbers.length})</option>`).join('');
+    const cur = arGet()[k].base || '';
+    sel.value = db.phoneBases.some(b => b.id === cur) ? cur : '';
+  });
+}
+function arRenderOffers(){
+  const c = arGet(), el = byId('arOfferList'); if(!el) return;
+  const items = c.offers.items;
+  el.innerHTML = items.length ? items.map((x, i) => `<div class="ar-offer" data-i="${i}">
+      <input type="checkbox" data-of="on" ${x.on !== false ? 'checked' : ''} style="width:20px;height:20px;margin-top:10px;accent-color:var(--signal);flex:0 0 auto;">
+      <div style="flex:1;min-width:0;"><input type="text" data-of="t" value="${escapeHtml(x.t || '')}" placeholder="Poste (ex. Plombier)">
+      <input type="text" data-of="d" value="${escapeHtml(x.d || '')}" placeholder="Détails (ville, salaire, contact…)" style="margin-top:6px;"></div>
+      <button type="button" class="btn btn-danger btn-small" data-of-del style="flex:0 0 auto;">✕</button></div>`).join('')
+    : '<div class="empty">Aucune offre. Ajoutez-en : seules les offres cochées sont envoyées.</div>';
+  el.querySelectorAll('.ar-offer').forEach(row => {
+    const i = parseInt(row.dataset.i, 10);
+    row.querySelectorAll('[data-of]').forEach(inp => inp.addEventListener(inp.type === 'checkbox' ? 'change' : 'input', () => {
+      const f = inp.dataset.of; items[i][f] = f === 'on' ? inp.checked : inp.value; arSaveSoon();
+    }));
+    row.querySelector('[data-of-del]').addEventListener('click', () => {
+      if(!confirm('Supprimer cette offre ?')) return;
+      items.splice(i, 1); arRenderOffers(); arSaveSoon();
+    });
+  });
+}
+// Même construction que sur le téléphone, pour voir le message avant qu'il parte.
+function arOffersPreview(){
+  const j = arPayload().offers, lines = [];
+  j.items.forEach(x => { if(x.on && x.t.trim()) lines.push(x.d.trim() ? x.t.trim() + ' - ' + x.d.trim() : x.t.trim()); });
+  if(!lines.length) return j.empty.trim() || '(aucun message : aucune offre cochée et aucun texte « sans offre »)';
+  let out = j.head.trim() ? j.head.trim() + '\n' : '', shown = 0; const foot = j.foot.trim();
+  for(let i = 0; i < lines.length; i++){
+    const row = (i + 1) + '. ' + lines[i] + '\n';
+    if(shown > 0 && out.length + row.length + foot.length + 40 > j.maxLen) break;
+    out += row; shown++;
+  }
+  if(shown < lines.length) out += '(+' + (lines.length - shown) + ' autres : demandez-nous)\n';
+  return (out + foot).trim();
+}
+function arRefreshStatus(){
+  const el = byId('arStatus'), pb = byId('arPermBtn'), cb = byId('arEnabled'); if(!el) return;
+  if(!NATIVE){
+    cb.disabled = true; cb.checked = false; pb.style.display = 'none';
+    el.innerHTML = "⚠️ Les réponses automatiques ne fonctionnent que dans l'application Android (c'est elle qui reçoit les SMS). Vous pouvez préparer ici les textes : ils sont synchronisés avec vos téléphones.";
+    return;
+  }
+  cb.checked = arEnabled();
+  let perm = false, st = { today: 0, stopped: 0 };
+  try{ perm = ShamanNative.autoReplyPerm(false); st = JSON.parse(ShamanNative.autoReplyStatus()); }catch(e){}
+  pb.style.display = (!perm && arEnabled()) ? 'inline-block' : 'none';
+  if(!arEnabled()) el.textContent = '⏸ Désactivé : le téléphone ne répond pas aux SMS reçus.';
+  else if(!perm) el.textContent = "⚠️ Autorisation manquante : touchez « Autoriser la réception des SMS » (réception + envoi).";
+  else el.textContent = `✅ Actif : le téléphone répond aux SMS reçus, même application fermée. Réponses envoyées aujourd'hui : ${st.today || 0} · numéros ayant écrit STOP : ${st.stopped || 0}.`;
+}
+function arRenderLog(){
+  const el = byId('arLogList'); if(!el) return;
+  if(!NATIVE){ el.innerHTML = "<div class=\"empty\">Le journal est disponible dans l'application Android.</div>"; return; }
+  let arr = []; try{ arr = JSON.parse(ShamanNative.getAutoReplyLog(60)); }catch(e){}
+  arr.reverse();
+  el.innerHTML = arr.length ? arr.map(x => `<div class="ar-log"><div class="t">${escapeHtml(new Date(x.t).toLocaleString('fr-FR'))} · ${escapeHtml(x.from || '')}</div>
+    ${x.ok ? '✅ Réponse envoyée' : '⏸ Pas de réponse'}${x.cat ? ' · ' + escapeHtml(AR_LABELS[x.cat] || x.cat) : ''}<br>
+    <span style="color:var(--text-dim);">${escapeHtml(x.note || '')}</span><br>
+    📩 ${escapeHtml(x.in || '')}${x.out ? '<br>💬 ' + escapeHtml(x.out) + (String(x.out).length >= 60 ? '…' : '') : ''}</div>`).join('')
+    : '<div class="empty">Aucune réponse pour l\'instant.</div>';
+}
+function arBind(){
+  const c = arGet();
+  byId('ar_cand_on').checked = c.cand.on !== false; byId('ar_cand_kw').value = c.cand.kw || ''; byId('ar_cand_reply').value = c.cand.reply || '';
+  byId('ar_recr_on').checked = c.recr.on !== false; byId('ar_recr_kw').value = c.recr.kw || ''; byId('ar_recr_reply').value = c.recr.reply || '';
+  byId('ar_offers_on').checked = c.offers.on !== false; byId('ar_offers_kw').value = c.offers.kw || '';
+  byId('ar_offers_head').value = c.offers.head || ''; byId('ar_offers_foot').value = c.offers.foot || ''; byId('ar_offers_empty').value = c.offers.empty || '';
+  byId('arCooldown').value = arNum(c.cooldownH, 12, 0, 720); byId('arMaxDay').value = arNum(c.maxPerDay, 150, 1, 2000); byId('arDelay').value = arNum(c.delaySec, 2, 0, 5);
+  byId('arByBase').checked = c.byBase !== false; byId('arFallback').value = c.fallback || '';
+  arFillBases(); arRenderOffers(); arRefreshStatus();
+}
+function arAfterSync(){ try{ arBind(); arPush(false); }catch(e){} }
+(function arInit(){
+  const wire = (id, fn, ev) => byId(id).addEventListener(ev || 'input', () => { fn(arGet(), byId(id)); arSaveSoon(); });
+  wire('ar_cand_on', (c, e) => { c.cand.on = e.checked; }, 'change');
+  wire('ar_cand_kw', (c, e) => { c.cand.kw = e.value; });
+  wire('ar_cand_reply', (c, e) => { c.cand.reply = e.value; });
+  wire('ar_cand_base', (c, e) => { c.cand.base = e.value; }, 'change');
+  wire('ar_recr_on', (c, e) => { c.recr.on = e.checked; }, 'change');
+  wire('ar_recr_kw', (c, e) => { c.recr.kw = e.value; });
+  wire('ar_recr_reply', (c, e) => { c.recr.reply = e.value; });
+  wire('ar_recr_base', (c, e) => { c.recr.base = e.value; }, 'change');
+  wire('ar_offers_on', (c, e) => { c.offers.on = e.checked; }, 'change');
+  wire('ar_offers_kw', (c, e) => { c.offers.kw = e.value; });
+  wire('ar_offers_head', (c, e) => { c.offers.head = e.value; });
+  wire('ar_offers_foot', (c, e) => { c.offers.foot = e.value; });
+  wire('ar_offers_empty', (c, e) => { c.offers.empty = e.value; });
+  wire('arCooldown', (c, e) => { c.cooldownH = arNum(e.value, 12, 0, 720); });
+  wire('arMaxDay', (c, e) => { c.maxPerDay = arNum(e.value, 150, 1, 2000); });
+  wire('arDelay', (c, e) => { c.delaySec = arNum(e.value, 2, 0, 5); });
+  wire('arByBase', (c, e) => { c.byBase = e.checked; }, 'change');
+  wire('arFallback', (c, e) => { c.fallback = e.value; });
+
+  byId('arOfferAdd').addEventListener('click', () => { arGet().offers.items.push({ t: '', d: '', on: true }); arRenderOffers(); arSaveSoon(); });
+  byId('arOfferPreview').addEventListener('click', () => { const o = byId('arOfferOut'); o.style.display = 'block'; o.textContent = arOffersPreview(); });
+  byId('arEnabled').addEventListener('change', e => {
+    try{ localStorage.setItem(AR_ENABLED_KEY, e.target.checked ? '1' : '0'); }catch(err){}
+    if(e.target.checked && NATIVE){ try{ ShamanNative.autoReplyPerm(true); }catch(err){} }
+    arPush(true); setTimeout(arRefreshStatus, 400);
+  });
+  byId('arPermBtn').addEventListener('click', () => { try{ ShamanNative.autoReplyPerm(true); }catch(e){} setTimeout(arRefreshStatus, 1200); });
+  byId('arResetBtn').addEventListener('click', () => {
+    if(!confirm("Remettre à zéro les compteurs, les délais d'attente par numéro et la liste des numéros qui ont écrit STOP ?")) return;
+    try{ ShamanNative.resetAutoReplyState(); }catch(e){}
+    arRefreshStatus(); toast('Compteurs remis à zéro.');
+  });
+  byId('arTestBtn').addEventListener('click', () => {
+    const out = byId('arTestOut'); out.style.display = 'block';
+    if(!NATIVE){ out.textContent = "Le test utilise le moteur de l'application Android."; return; }
+    const msg = byId('arTestMsg').value;
+    if(!msg.trim()){ out.textContent = 'Écrivez le message reçu à simuler.'; return; }
+    out.textContent = '⏳ …';
+    arGet().updatedAt = arGet().updatedAt || Date.now();
+    arPush(true);
+    setTimeout(() => {
+      try{
+        const ph = normCI(byId('arTestFrom').value), from = ph && ph.num ? ph.num : byId('arTestFrom').value.trim();
+        const r = JSON.parse(ShamanNative.testAutoReply(from, msg));
+        out.textContent = !r.ok ? '⚠️ ' + r.why
+          : r.reply ? `✅ Réponse qui serait envoyée — ${AR_LABELS[r.cat] || r.cat}\n(${r.why})\n\n${r.reply}`
+          : `⏸ Aucune réponse : ${r.why}`;
+      }catch(e){ out.textContent = '⚠️ Test impossible : ' + e; }
+    }, 300);
+  });
+  byId('arLogRefresh').addEventListener('click', arRenderLog);
+  byId('arLogClear').addEventListener('click', () => { if(confirm('Vider le journal des réponses ?')){ try{ ShamanNative.clearAutoReplyLog(); }catch(e){} arRenderLog(); } });
+  document.querySelector('[data-tab="auto"]').addEventListener('click', () => { arBind(); arRenderLog(); });
+  ['ar_cand_reply', 'ar_recr_reply', 'arFallback'].forEach(id => { const ta = byId(id); if(ta && !ta.dataset.counter){ ta.dataset.counter = '1'; smsCounterFor(ta); } });
+  const prev = window.onShamanPerm;
+  window.onShamanPerm = function(){ if(prev) prev(); arRefreshStatus(); };
+  arBind();
+  if(NATIVE) arPush(true);
+})();
 
 /* ================= INIT ================= */
 if(repairIvorianNumbers()){
