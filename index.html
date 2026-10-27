@@ -243,6 +243,7 @@
     <button class="tab-btn" data-tab="scheduled">Programmés</button>
     <button class="tab-btn" data-tab="robot">🤖 Robot</button>
     <button class="tab-btn" data-tab="auto">💬 Réponses auto</button>
+    <button class="tab-btn" data-tab="calls">📞 Appels auto</button>
     <button class="tab-btn" data-tab="scanner">📷 Scanner</button>
     <button class="tab-btn" data-tab="blocked">🚫 Bloqués</button>
   </nav>
@@ -795,6 +796,103 @@
     </div>
   </div>
 
+  <!-- ===================== RÉPONSES AUX APPELS ===================== -->
+  <div class="tabpanel" id="tab-calls">
+    <div class="card" id="crMainCard">
+      <h2>📞 Réponses aux appels</h2>
+      <p class="dim">Quand quelqu'un vous appelle et que vous ne décrochez pas (ou refusez l'appel) pendant que vous êtes indisponible, ce téléphone envoie tout seul un SMS à l'appelant. Si vous décrochez, rien n'est envoyé. Chaque réponse est un vrai SMS (il utilise votre crédit).</p>
+      <label class="check-row"><input type="checkbox" id="crEnabled"> Activer les réponses aux appels sur ce téléphone</label>
+      <div id="crStatus" class="dim" style="font-size:12.5px;margin-top:6px;line-height:1.5;"></div>
+      <div class="row" style="margin-top:8px;gap:6px;flex-wrap:wrap;">
+        <button type="button" class="btn btn-primary btn-small" id="crPermBtn" style="display:none;">🔓 Autoriser les appels et les SMS</button>
+        <button type="button" class="btn btn-secondary btn-small" id="crResetBtn">↺ Remettre les compteurs à zéro</button>
+      </div>
+      <p class="dim" style="font-size:12px;margin:10px 0 0;">Pour que ça marche écran éteint et application fermée : acceptez les autorisations « Téléphone », « Journal d'appels » et « SMS », autorisez l'application à rester active en arrière-plan, et, selon la marque du téléphone, activez son « démarrage automatique ».</p>
+    </div>
+    <div class="card" id="crNowCard">
+      <h2>🕒 Mon statut maintenant</h2>
+      <div class="ar-out" id="crNow" style="margin:0 0 10px;"></div>
+      <div class="row" id="crBtns" style="flex-wrap:wrap;gap:6px;">
+        <button type="button" class="btn btn-secondary btn-small" data-st="none">✅ Disponible</button>
+        <button type="button" class="btn btn-secondary btn-small" data-st="meeting">🤝 En réunion</button>
+        <button type="button" class="btn btn-secondary btn-small" data-st="sleep">🛏️ Couché</button>
+        <button type="button" class="btn btn-secondary btn-small" data-st="travel">✈️ En voyage</button>
+      </div>
+      <label>Pendant combien de temps ? (pour « réunion », « couché » ou « voyage »)</label>
+      <select id="crDur">
+        <option value="0">Jusqu'à ce que je le change moi-même</option>
+        <option value="30">30 minutes</option>
+        <option value="60">1 heure</option>
+        <option value="120" selected>2 heures</option>
+        <option value="240">4 heures</option>
+        <option value="morning">Jusqu'à demain 07:00</option>
+        <option value="date">Jusqu'à une date et une heure précises…</option>
+      </select>
+      <div id="crDateWrap" style="display:none;"><label>Date et heure de fin (retour)</label><input type="datetime-local" id="crUntil"></div>
+      <p class="dim" style="font-size:12px;margin:8px 0 0;">Touchez un statut pour l'appliquer tout de suite. À la fin du délai, le téléphone redevient « Disponible » tout seul (sauf si vous avez choisi « jusqu'à ce que je le change »).</p>
+    </div>
+    <div class="card" id="crNightCard">
+      <h2>🌙 Nuit (automatique chaque jour)</h2>
+      <label class="check-row"><input type="checkbox" id="crNightOn"> Répondre aux appels pendant ces heures tardives</label>
+      <div class="row" style="gap:8px;">
+        <div style="flex:1;"><label>De</label><input type="time" id="crNightFrom"></div>
+        <div style="flex:1;"><label>À</label><input type="time" id="crNightTo"></div>
+      </div>
+      <label>Message envoyé la nuit</label>
+      <textarea id="cr_night_reply" style="min-height:90px;"></textarea>
+    </div>
+    <div class="card" id="crTextCard">
+      <h2>✍️ Messages des autres statuts</h2>
+      <p class="dim" style="font-size:12px;">Écrivez <b>{retour}</b> là où l'heure de retour doit apparaître : elle devient « vers 15h30 », « demain vers 07h00 », « le 02/11 vers 18h00 », ou « dès que possible » si vous n'avez pas donné d'heure de fin.</p>
+      <label>🤝 En réunion</label>
+      <textarea id="cr_meeting_reply" style="min-height:90px;"></textarea>
+      <label>🛏️ Couché</label>
+      <textarea id="cr_sleep_reply" style="min-height:90px;"></textarea>
+      <label>✈️ En voyage</label>
+      <textarea id="cr_travel_reply" style="min-height:90px;"></textarea>
+    </div>
+    <div class="card" id="crSetCard">
+      <h2>⚙️ Réglages</h2>
+      <label>Délai avant de renvoyer le même message à un même numéro (heures) — évite d'envoyer dix SMS à quelqu'un qui rappelle dix fois</label>
+      <input type="number" id="crCooldown" min="0" max="720">
+      <label>Maximum de réponses par jour (tous numéros) — protège votre crédit et contre un blocage opérateur</label>
+      <input type="number" id="crMaxDay" min="1" max="2000">
+      <label>Attente avant d'envoyer la réponse (secondes, 0 à 4)</label>
+      <input type="number" id="crDelay" min="0" max="4">
+      <label class="check-row" style="margin-top:8px;"><input type="checkbox" id="crOnlyLocal"> Ne pas répondre aux numéros étrangers (recommandé : certains appels venus de l'étranger sont des pièges qui vous font dépenser du crédit en SMS internationaux)</label>
+      <label>Indicatif de votre pays</label>
+      <input type="text" id="crHome" inputmode="numeric" placeholder="225">
+      <label>Numéros à ne jamais contacter par réponse automatique (famille, amis… un numéro par ligne)</label>
+      <textarea id="crExcept" inputmode="tel" style="min-height:70px;" placeholder="Ex. 0748935686"></textarea>
+      <p class="dim" style="font-size:12px;margin:8px 0 0;">Les numéros bloqués (onglet « Bloqués »), les numéros masqués et les numéros courts ne reçoivent jamais de réponse.</p>
+    </div>
+    <div class="card" id="crTestCard">
+      <h2>🧪 Tester</h2>
+      <p class="dim" style="font-size:12px;">Simule un appel manqué : l'app indique le SMS qu'elle enverrait, sans rien envoyer.</p>
+      <label>Statut à simuler</label>
+      <select id="crTestMode">
+        <option value="">Le statut actif en ce moment</option>
+        <option value="night">🌙 Nuit</option>
+        <option value="meeting">🤝 En réunion</option>
+        <option value="sleep">🛏️ Couché</option>
+        <option value="travel">✈️ En voyage</option>
+      </select>
+      <label>Numéro de l'appelant (facultatif)</label>
+      <input type="tel" inputmode="tel" id="crTestFrom" placeholder="Ex. 0748935686">
+      <div style="height:8px"></div>
+      <button type="button" class="btn btn-primary" id="crTestBtn">Tester</button>
+      <div class="ar-out" id="crTestOut" style="display:none;"></div>
+    </div>
+    <div class="card" id="crLogCard">
+      <h2>🕘 Dernières réponses aux appels</h2>
+      <div class="row" style="gap:6px;margin-bottom:6px;">
+        <button type="button" class="btn btn-secondary btn-small" id="crLogRefresh">🔄 Actualiser</button>
+        <button type="button" class="btn btn-danger btn-small" id="crLogClear">Vider</button>
+      </div>
+      <div id="crLogList"><div class="empty">Aucune réponse pour l'instant.</div></div>
+    </div>
+  </div>
+
   <div class="tabpanel" id="tab-scanner">
     <div class="card">
       <h2>📷 Scanner de numéros</h2>
@@ -940,6 +1038,7 @@ function saveDB(){
   scheduleSyncPush();
   if(typeof pushSkipToNative === 'function') pushSkipToNative(false);
   if(typeof arPush === 'function') arPush(false);
+  if(typeof crPush === 'function') crPush(false);
 }
 let db = loadDB();
 if(!db.scheduled) db.scheduled = [];
@@ -1215,6 +1314,7 @@ function mergeDb(local, remote){
     robotSettings: ((remote.robotSettings||{}).updatedAt||0) > ((local.robotSettings||{}).updatedAt||0) ? remote.robotSettings : local.robotSettings,
     scanSettings: ((remote.scanSettings||{}).updatedAt||0) > ((local.scanSettings||{}).updatedAt||0) ? remote.scanSettings : local.scanSettings,
     autoReply: ((remote.autoReply||{}).updatedAt||0) > ((local.autoReply||{}).updatedAt||0) ? remote.autoReply : local.autoReply,
+    callReply: ((remote.callReply||{}).updatedAt||0) > ((local.callReply||{}).updatedAt||0) ? remote.callReply : local.callReply,
     robotJobs: mergeNewest(local.robotJobs, remote.robotJobs).filter(j => j.at > Date.now() - 14*864e5),
     tombstones,
     _syncedAt: Date.now()
@@ -1233,6 +1333,7 @@ function refreshEverything(){
   document.getElementById('smsBatches').innerHTML = '';
   document.getElementById('mailBatches').innerHTML = '';
   if(typeof arAfterSync === 'function') arAfterSync();
+  if(typeof crAfterSync === 'function') crAfterSync();
 }
 
 // Synchronisation complète : récupère le cloud, fusionne avec les données
@@ -1683,7 +1784,7 @@ smsBody.addEventListener('input', () => {
    Dans l'APK, window.ShamanNative existe : les SMS partent directement,
    sans ouvrir l'appli SMS, avec choix automatique de la SIM. */
 const NATIVE = !!window.ShamanNative;
-const APP_VERSION = '1.19';
+const APP_VERSION = '1.20';
 const nativeCbs = {};
 window.onShamanSms = function(json){
   try{ const e = JSON.parse(json); const cb = nativeCbs[e.id]; if(cb) cb(e); if(e.type === 'done') delete nativeCbs[e.id]; }catch(err){}
@@ -4981,6 +5082,215 @@ function arAfterSync(){ try{ arBind(); arPush(false); }catch(e){} }
   window.onShamanPerm = function(){ if(prev) prev(); arRefreshStatus(); };
   arBind();
   if(NATIVE) arPush(true);
+})();
+
+/* ---------- Réponses automatiques aux APPELS (appels non décrochés) ----------
+   L'interrupteur et le statut du moment sont propres à chaque téléphone (ils restent sur ce téléphone) ;
+   les textes et réglages sont synchronisés avec vos autres téléphones comme le reste. */
+const CR_ENABLED_KEY = 'shaman_cr_enabled';
+const CR_STATUS_KEY = 'shaman_cr_status';
+const CR_LABELS = { meeting: 'En réunion', sleep: 'Couché', travel: 'En voyage', night: 'Nuit' };
+const CR_ICONS = { none: '✅', meeting: '🤝', sleep: '🛏️', travel: '✈️', night: '🌙' };
+const CR_DEFAULT = {
+  updatedAt: 1, cooldownH: 6, maxPerDay: 100, delaySec: 2, onlyLocal: true, homePrefix: '225', except: '',
+  night:   { on: true, from: '22:00', to: '06:00', reply: "Bonjour, vous avez appelé à une heure tardive : je ne réponds pas la nuit. Je vous rappelle {retour}. Vous pouvez aussi m'écrire par SMS." },
+  meeting: { reply: "Bonjour, je suis en réunion et je ne peux pas répondre. Je vous rappelle {retour}. Vous pouvez m'écrire votre besoin par SMS." },
+  sleep:   { reply: "Bonjour, je me repose et je ne peux pas répondre pour le moment. Je vous rappelle {retour}. Vous pouvez m'écrire votre besoin par SMS." },
+  travel:  { reply: "Bonjour, je suis en voyage et je ne peux pas répondre pour le moment. Je vous rappelle {retour}. Vous pouvez m'écrire votre besoin par SMS." }
+};
+function crGet(){
+  if(!db.callReply) db.callReply = JSON.parse(JSON.stringify(CR_DEFAULT));
+  const c = db.callReply;
+  ['night', 'meeting', 'sleep', 'travel'].forEach(k => { if(!c[k]) c[k] = JSON.parse(JSON.stringify(CR_DEFAULT[k])); });
+  return c;
+}
+function crEnabled(){ try{ return localStorage.getItem(CR_ENABLED_KEY) === '1'; }catch(e){ return false; } }
+function crStatus(){
+  try{
+    const s = JSON.parse(localStorage.getItem(CR_STATUS_KEY) || 'null');
+    if(s && ['meeting', 'sleep', 'travel'].includes(s.mode) && (!s.until || s.until > Date.now())) return { mode: s.mode, until: s.until || 0 };
+  }catch(e){}
+  return { mode: 'none', until: 0 };
+}
+function crSaveStatus(mode, until){
+  try{ localStorage.setItem(CR_STATUS_KEY, JSON.stringify({ mode: mode, until: until || 0 })); }catch(e){}
+  crPush(true); crRenderNow(); crRefreshStatus();
+}
+// Même calcul que sur le téléphone : la plage de nuit, si on est dedans, avec son heure de fin.
+function crNightEnd(c, now){
+  const n = c.night; if(!n || n.on === false) return 0;
+  const f = t => { const p = String(t || '').split(':').map(Number); return (p[0] || 0) * 60 + (p[1] || 0); };
+  const a = f(n.from || '22:00'), b = f(n.to || '06:00'), d = new Date(now), cur = d.getHours() * 60 + d.getMinutes();
+  if(a === b) return 0;
+  const inside = a < b ? (cur >= a && cur < b) : (cur >= a || cur < b);
+  if(!inside) return 0;
+  const e = new Date(now); e.setHours(Math.floor(b / 60), b % 60, 0, 0);
+  if(e.getTime() <= now) e.setDate(e.getDate() + 1);
+  return e.getTime();
+}
+function crEffective(){
+  const s = crStatus(); if(s.mode !== 'none') return s;
+  const end = crNightEnd(crGet(), Date.now());
+  return end ? { mode: 'night', until: end } : { mode: 'none', until: 0 };
+}
+function crUntilText(u){
+  if(!u) return "jusqu'à ce que vous le changiez";
+  const d = new Date(u), t = d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  return new Date().toDateString() === d.toDateString() ? "jusqu'à " + t : "jusqu'au " + d.toLocaleDateString('fr-FR') + ' à ' + t;
+}
+function crPayload(){
+  const c = crGet(), s = crStatus();
+  const except = String(c.except || '').split(/[\n,;]+/).map(x => x.trim()).filter(Boolean);
+  const txt = k => ({ reply: String(c[k].reply || '') });
+  return {
+    enabled: crEnabled(),
+    status: { mode: s.mode, until: s.until || 0 },
+    cooldownH: arNum(c.cooldownH, 6, 0, 720), maxPerDay: arNum(c.maxPerDay, 100, 1, 2000), delaySec: arNum(c.delaySec, 2, 0, 4),
+    onlyLocal: c.onlyLocal !== false, homePrefix: String(c.homePrefix || '225').replace(/\D/g, ''),
+    night: { on: c.night.on !== false, from: c.night.from || '22:00', to: c.night.to || '06:00', reply: String(c.night.reply || '') },
+    meeting: txt('meeting'), sleep: txt('sleep'), travel: txt('travel'),
+    except: except,
+    blocked: db.blockedNumbers.map(b => b.number)
+  };
+}
+var crLastPushed = '', crPushTimer = null;
+function crPush(force){
+  if(!NATIVE) return;
+  clearTimeout(crPushTimer);
+  crPushTimer = setTimeout(() => {
+    try{
+      const js = JSON.stringify(crPayload());
+      if(!force && js === crLastPushed) return;
+      if(ShamanNative.setCallReply(js) === 'ok') crLastPushed = js;
+    }catch(e){}
+  }, force ? 0 : 1500);
+}
+let crSaveTimer = null;
+function crSaveSoon(){
+  clearTimeout(crSaveTimer);
+  crSaveTimer = setTimeout(() => { crGet().updatedAt = Date.now(); saveDB(); }, 500);
+}
+function crRenderNow(){
+  const box = byId('crNow'); if(!box) return;
+  const e = crEffective(), s = crStatus();
+  let t;
+  if(e.mode === 'none') t = "✅ Disponible : aucun SMS automatique n'est envoyé aux appelants.";
+  else t = `${CR_ICONS[e.mode]} ${CR_LABELS[e.mode]}${e.mode === 'night' ? ' (automatique)' : ''} — ${crUntilText(e.until)}.\nUn appelant que vous ne prenez pas reçoit le message « ${CR_LABELS[e.mode]} ».`;
+  if(!crEnabled()) t += "\n⏸ Les réponses aux appels sont désactivées sur ce téléphone (interrupteur en haut).";
+  box.textContent = t;
+  document.querySelectorAll('#crBtns [data-st]').forEach(b => {
+    const on = b.dataset.st === s.mode;
+    b.classList.toggle('btn-primary', on); b.classList.toggle('btn-secondary', !on);
+  });
+}
+function crRefreshStatus(){
+  const el = byId('crStatus'), pb = byId('crPermBtn'), cb = byId('crEnabled'); if(!el) return;
+  if(!NATIVE){
+    cb.disabled = true; cb.checked = false; pb.style.display = 'none';
+    el.textContent = "⚠️ Les réponses aux appels ne fonctionnent que dans l'application Android (c'est elle qui voit les appels). Vous pouvez préparer ici les textes : ils sont synchronisés avec vos téléphones.";
+    return;
+  }
+  cb.checked = crEnabled();
+  let perm = false, st = { today: 0 };
+  try{ perm = ShamanNative.callReplyPerm(false); st = JSON.parse(ShamanNative.callReplyStatus()); }catch(e){}
+  pb.style.display = (!perm && crEnabled()) ? 'inline-block' : 'none';
+  if(!crEnabled()) el.textContent = '⏸ Désactivé : le téléphone ne répond pas aux appels manqués.';
+  else if(!perm) el.textContent = "⚠️ Autorisations manquantes : touchez « Autoriser les appels et les SMS » (état du téléphone, journal d'appels et envoi de SMS).";
+  else el.textContent = `✅ Actif : le téléphone répond aux appels non décrochés quand un statut est actif, même application fermée. Réponses envoyées aujourd'hui : ${st.today || 0}.`;
+}
+function crUntilFromUI(){
+  const v = byId('crDur').value, now = Date.now();
+  if(v === '0') return 0;
+  if(v === 'morning'){ const d = new Date(); d.setHours(7, 0, 0, 0); if(d.getTime() <= now + 60000) d.setDate(d.getDate() + 1); return d.getTime(); }
+  if(v === 'date'){ const t = new Date(byId('crUntil').value).getTime(); return isNaN(t) ? null : t; }
+  return now + parseInt(v, 10) * 60000;
+}
+function crApply(st){
+  if(st === 'none'){ crSaveStatus('none', 0); toast('Vous êtes disponible : plus de SMS automatique (hors plage de nuit).'); return; }
+  const u = crUntilFromUI();
+  if(u === null){ toast("Choisissez la date et l'heure de fin."); return; }
+  if(u > 0 && u < Date.now() + 30000){ toast("L'heure de fin doit être dans le futur."); return; }
+  crSaveStatus(st, u);
+  toast(`${CR_ICONS[st]} ${CR_LABELS[st]} — ${crUntilText(u)}.`);
+}
+function crRenderLog(){
+  const el = byId('crLogList'); if(!el) return;
+  if(!NATIVE){ el.innerHTML = "<div class=\"empty\">Le journal est disponible dans l'application Android.</div>"; return; }
+  let arr = []; try{ arr = JSON.parse(ShamanNative.getCallReplyLog(60)); }catch(e){}
+  arr.reverse();
+  el.innerHTML = arr.length ? arr.map(x => `<div class="ar-log"><div class="t">${escapeHtml(new Date(x.t).toLocaleString('fr-FR'))} · ${escapeHtml(x.from || '')}</div>
+    ${x.ok ? '✅ SMS envoyé' : '⏸ Pas de SMS'}${x.mode ? ' · ' + escapeHtml(CR_LABELS[x.mode] || x.mode) : ''}<br>
+    <span style="color:var(--text-dim);">${escapeHtml(x.note || '')}</span>${x.out ? '<br>💬 ' + escapeHtml(x.out) + (String(x.out).length >= 60 ? '…' : '') : ''}</div>`).join('')
+    : '<div class="empty">Aucune réponse pour l\'instant.</div>';
+}
+function crBind(){
+  const c = crGet();
+  byId('crNightOn').checked = c.night.on !== false; byId('crNightFrom').value = c.night.from || '22:00'; byId('crNightTo').value = c.night.to || '06:00';
+  byId('cr_night_reply').value = c.night.reply || ''; byId('cr_meeting_reply').value = c.meeting.reply || '';
+  byId('cr_sleep_reply').value = c.sleep.reply || ''; byId('cr_travel_reply').value = c.travel.reply || '';
+  byId('crCooldown').value = arNum(c.cooldownH, 6, 0, 720); byId('crMaxDay').value = arNum(c.maxPerDay, 100, 1, 2000); byId('crDelay').value = arNum(c.delaySec, 2, 0, 4);
+  byId('crOnlyLocal').checked = c.onlyLocal !== false; byId('crHome').value = c.homePrefix || '225'; byId('crExcept').value = c.except || '';
+  crRenderNow(); crRefreshStatus();
+}
+function crAfterSync(){ try{ crBind(); crPush(false); }catch(e){} }
+(function crInit(){
+  const wire = (id, fn, ev) => byId(id).addEventListener(ev || 'input', () => { fn(crGet(), byId(id)); crSaveSoon(); crRenderNow(); });
+  wire('crNightOn', (c, e) => { c.night.on = e.checked; }, 'change');
+  wire('crNightFrom', (c, e) => { c.night.from = e.value || '22:00'; }, 'change');
+  wire('crNightTo', (c, e) => { c.night.to = e.value || '06:00'; }, 'change');
+  wire('cr_night_reply', (c, e) => { c.night.reply = e.value; });
+  wire('cr_meeting_reply', (c, e) => { c.meeting.reply = e.value; });
+  wire('cr_sleep_reply', (c, e) => { c.sleep.reply = e.value; });
+  wire('cr_travel_reply', (c, e) => { c.travel.reply = e.value; });
+  wire('crCooldown', (c, e) => { c.cooldownH = arNum(e.value, 6, 0, 720); });
+  wire('crMaxDay', (c, e) => { c.maxPerDay = arNum(e.value, 100, 1, 2000); });
+  wire('crDelay', (c, e) => { c.delaySec = arNum(e.value, 2, 0, 4); });
+  wire('crOnlyLocal', (c, e) => { c.onlyLocal = e.checked; }, 'change');
+  wire('crHome', (c, e) => { c.homePrefix = e.value.replace(/\D/g, ''); });
+  wire('crExcept', (c, e) => { c.except = e.value; });
+
+  document.querySelectorAll('#crBtns [data-st]').forEach(b => b.addEventListener('click', () => crApply(b.dataset.st)));
+  byId('crDur').addEventListener('change', () => {
+    byId('crDateWrap').style.display = byId('crDur').value === 'date' ? 'block' : 'none';
+    const s = crStatus(); if(s.mode !== 'none' && byId('crDur').value !== 'date') crApply(s.mode);
+  });
+  byId('crUntil').addEventListener('change', () => { const s = crStatus(); if(s.mode !== 'none') crApply(s.mode); });
+  byId('crEnabled').addEventListener('change', e => {
+    try{ localStorage.setItem(CR_ENABLED_KEY, e.target.checked ? '1' : '0'); }catch(err){}
+    if(e.target.checked && NATIVE){ try{ ShamanNative.callReplyPerm(true); }catch(err){} }
+    crPush(true); crRenderNow(); setTimeout(crRefreshStatus, 400);
+  });
+  byId('crPermBtn').addEventListener('click', () => { try{ ShamanNative.callReplyPerm(true); }catch(e){} setTimeout(crRefreshStatus, 1200); });
+  byId('crResetBtn').addEventListener('click', () => {
+    if(!confirm("Remettre à zéro les compteurs du jour et les délais d'attente par numéro ?")) return;
+    try{ ShamanNative.resetCallReplyState(); }catch(e){}
+    crRefreshStatus(); toast('Compteurs remis à zéro.');
+  });
+  byId('crTestBtn').addEventListener('click', () => {
+    const out = byId('crTestOut'); out.style.display = 'block';
+    if(!NATIVE){ out.textContent = "Le test utilise le moteur de l'application Android."; return; }
+    out.textContent = '⏳ …';
+    crGet().updatedAt = crGet().updatedAt || Date.now();
+    crPush(true);
+    setTimeout(() => {
+      try{
+        const ph = normCI(byId('crTestFrom').value), from = ph && ph.num ? ph.num : byId('crTestFrom').value.trim();
+        const r = JSON.parse(ShamanNative.testCallReply(from, byId('crTestMode').value));
+        out.textContent = !r.ok ? '⚠️ ' + r.why
+          : r.reply ? `✅ SMS qui serait envoyé — ${CR_LABELS[r.mode] || r.mode}\n(${r.why})\n\n${r.reply}`
+          : `⏸ Aucun SMS : ${r.why}`;
+      }catch(e){ out.textContent = '⚠️ Test impossible : ' + e; }
+    }, 300);
+  });
+  byId('crLogRefresh').addEventListener('click', crRenderLog);
+  byId('crLogClear').addEventListener('click', () => { if(confirm('Vider le journal des réponses aux appels ?')){ try{ ShamanNative.clearCallReplyLog(); }catch(e){} crRenderLog(); } });
+  document.querySelector('[data-tab="calls"]').addEventListener('click', () => { crBind(); crRenderLog(); });
+  ['cr_night_reply', 'cr_meeting_reply', 'cr_sleep_reply', 'cr_travel_reply'].forEach(id => { const ta = byId(id); if(ta && !ta.dataset.counter){ ta.dataset.counter = '1'; smsCounterFor(ta); } });
+  const prev = window.onShamanPerm;
+  window.onShamanPerm = function(){ if(prev) prev(); crRefreshStatus(); };
+  setInterval(() => { if(document.visibilityState === 'visible' && byId('tab-calls').classList.contains('active')) crRenderNow(); }, 30000);
+  crBind();
+  if(NATIVE) crPush(true);
 })();
 
 /* ================= INIT ================= */
