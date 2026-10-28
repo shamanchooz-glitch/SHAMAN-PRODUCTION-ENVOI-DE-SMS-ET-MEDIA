@@ -1341,37 +1341,129 @@ function refreshEverything(){
 // renvoie ce résultat fusionné vers le cloud pour que tout le monde
 // converge vers les mêmes données.
 let syncInFlight = false;
+let syncStartedAt = 0;
+let syncLastMsg = '';
+
+// --- Outils réseau de la synchro -------------------------------------------
+// Avant : toute erreur donnait le même message « connexion instable ? », sans
+// dire si c'était Firebase qui refusait l'accès, une adresse fausse, ou
+// vraiment le réseau. Maintenant chaque cas affiche sa vraie cause.
+function syncError(kind, status, detail){
+  const e = new Error(kind + (status ? ' ' + status : ''));
+  e.kind = kind; e.status = status || 0; e.detail = detail || '';
+  return e;
+}
+// Appel réseau avec délai maximum (une connexion qui « pend » ne bloque plus
+// toutes les synchros suivantes). Renvoie { ok, status, text }.
+async function syncRequest(url, options){
+  const ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), 90000) : null;
+  try{
+    const res = await fetch(url, Object.assign({}, options || {}, ctrl ? { signal: ctrl.signal } : {}));
+    const text = await res.text();
+    return { ok: res.ok, status: res.status, text };
+  }catch(e){
+    if(e && e.name === 'AbortError') throw syncError('timeout');
+    throw syncError('network');
+  }finally{
+    if(timer) clearTimeout(timer);
+  }
+}
+function syncHttpError(r){
+  let detail = '';
+  try{ const j = JSON.parse(r.text); if(j && j.error) detail = String(j.error); }catch(e){}
+  return syncError('http', r.status, detail);
+}
+function syncErrorMessage(e){
+  const d = e.detail ? ' (« ' + e.detail + ' »)' : '';
+  if(e.kind === 'http'){
+    if(e.status === 401 || e.status === 403) return '⚠️ Firebase refuse l\'accès (erreur ' + e.status + ')' + d + ' : les règles de la base n\'autorisent pas encore la synchro. Ajoutez la règle « sms-app » dans Firebase → Realtime Database → Règles, puis Publier.';
+    if(e.status === 404) return '⚠️ Base Firebase introuvable (erreur 404)' + d + ' : l\'adresse de la base est incorrecte ou la base n\'existe pas.';
+    if(e.status === 423) return '⚠️ La base Firebase est verrouillée (erreur 423)' + d + ' : vérifiez le projet dans la console Firebase.';
+    if(e.status === 400) return '⚠️ Firebase a refusé les données (erreur 400)' + d + '.';
+    if(e.status === 413) return '⚠️ Les données sont trop volumineuses pour Firebase (erreur 413).';
+    if(e.status === 429 || e.status >= 500) return '⚠️ Firebase est momentanément indisponible (erreur ' + e.status + ') — réessayez dans quelques minutes.';
+    return '⚠️ Erreur Firebase (HTTP ' + e.status + ')' + d + '.';
+  }
+  if(e.kind === 'timeout') return '⚠️ Délai dépassé : la connexion est trop lente. Réessayez avec un meilleur réseau.';
+  if(e.kind === 'network') return '⚠️ Impossible de joindre Firebase : vérifiez que le téléphone a bien internet (Wi-Fi ou données mobiles).';
+  if(e.kind === 'parse') return '⚠️ Réponse illisible reçue de Firebase — réessayez.';
+  return '⚠️ Échec de synchronisation (' + (e && e.message ? e.message : 'erreur inconnue') + ').';
+}
+
+// Firebase supprime les tableaux vides et peut renvoyer un tableau sous forme
+// d'objet : on remet tout dans la forme attendue avant de fusionner (sinon une
+// base vide ou une règle sans groupe arrivée d'un autre téléphone fait planter).
+function fbToArray(v){
+  if(Array.isArray(v)) return v.filter(x => x !== null && x !== undefined);
+  if(v && typeof v === 'object') return Object.keys(v).sort((a, b) => a - b).map(k => v[k]).filter(x => x !== null && x !== undefined);
+  return [];
+}
+function normalizeRemote(r){
+  if(!r || typeof r !== 'object' || Array.isArray(r)) return null;
+  ['contacts','groups','scheduled','phoneBases','blockedNumbers','robotRules','robotJobs'].forEach(k => { r[k] = fbToArray(r[k]); });
+  r.phoneBases.forEach(b => { b.numbers = fbToArray(b.numbers); b.deletedNumbers = fbToArray(b.deletedNumbers); });
+  r.robotRules.forEach(x => {
+    x.groupIds = fbToArray(x.groupIds); x.numbers = fbToArray(x.numbers);
+    ['days','times'].forEach(f => { if(x[f] && !Array.isArray(x[f])) x[f] = fbToArray(x[f]); });
+  });
+  if(!r.tombstones || typeof r.tombstones !== 'object') r.tombstones = {};
+  return r;
+}
+
+// Synchronisation complète : récupère le cloud, fusionne avec les données
+// locales (rien n'est perdu d'aucun côté), applique le résultat ici, puis
+// renvoie ce résultat fusionné vers le cloud pour que tout le monde
+// converge vers les mêmes données.
 async function syncNow(code, opts){
   opts = opts || {};
   if(!code) return false;
   if(!navigator.onLine){
-    updateSyncStatus('⚠️ Hors-ligne — sera synchronisé automatiquement dès que possible.');
+    syncLastMsg = '⚠️ Hors-ligne — sera synchronisé automatiquement dès que possible.';
+    updateSyncStatus(syncLastMsg);
     return false;
   }
-  if(syncInFlight) return false;
-  syncInFlight = true;
+  // Une synchro « coincée » depuis plus de 2 minutes ne bloque plus les suivantes.
+  if(syncInFlight && (Date.now() - syncStartedAt) < 120000){
+    syncLastMsg = '⏳ Une synchronisation est déjà en cours…';
+    return false;
+  }
+  syncInFlight = true; syncStartedAt = Date.now();
   if(!opts.silent) updateSyncStatus('⏳ Synchronisation…');
   try{
-    const res = await fetch(syncUrl(code));
-    const remote = res.ok ? await res.json() : null;
+    // 1) Lecture du cloud. Si elle échoue, on S'ARRÊTE : avant, une lecture
+    //    ratée était prise pour « cloud vide » et l'envoi suivant pouvait
+    //    écraser les données des autres téléphones.
+    const got = await syncRequest(syncUrl(code));
+    if(!got.ok) throw syncHttpError(got);
+    let remote = null;
+    const txt = (got.text || '').trim();
+    if(txt && txt !== 'null'){
+      try{ remote = normalizeRemote(JSON.parse(txt)); }catch(e){ throw syncError('parse'); }
+    }
 
+    // 2) Fusion locale.
     const before = JSON.stringify(db);
     db = mergeDb(db, remote);
     const changed = JSON.stringify(db) !== before;
     localStorage.setItem(DB_KEY, JSON.stringify(db));
     if(changed) refreshEverything();
 
-    const putRes = await fetch(syncUrl(code), {
+    // 3) Envoi du résultat fusionné.
+    const put = await syncRequest(syncUrl(code), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(db)
     });
-    if(!putRes.ok) throw new Error('HTTP ' + putRes.status);
+    if(!put.ok) throw syncHttpError(put);
 
+    syncLastMsg = '';
     updateSyncStatus('✅ Synchronisé à ' + new Date().toLocaleTimeString());
     return true;
   }catch(e){
-    updateSyncStatus('⚠️ Échec de synchronisation (connexion instable ?)');
+    try{ console.warn('Synchro échouée :', e); }catch(_){}
+    syncLastMsg = syncErrorMessage(e);
+    updateSyncStatus(syncLastMsg);
     return false;
   }finally{
     syncInFlight = false;
@@ -1405,6 +1497,7 @@ document.getElementById('syncPushBtn').addEventListener('click', async () => {
   setSyncCode(code);
   const ok = await syncNow(code);
   if(ok) alert("Synchronisation terminée — vos contacts, bases et messages programmés sont à jour (rien n'a été supprimé). Entrez le même code sur vos autres téléphones pour qu'ils reçoivent tout aussi.");
+  else if(syncLastMsg) alert(syncLastMsg);
 });
 
 document.getElementById('syncForget').addEventListener('click', (e) => {
