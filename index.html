@@ -1312,7 +1312,7 @@ function mergeDb(local, remote){
     blockedNumbers: mergeById(local.blockedNumbers, remote.blockedNumbers, tombstones.blockedNumbers),
     robotRules: mergeNewest(local.robotRules, remote.robotRules, tombstones.robotRules),
     robotSettings: ((remote.robotSettings||{}).updatedAt||0) > ((local.robotSettings||{}).updatedAt||0) ? remote.robotSettings : local.robotSettings,
-    scanSettings: ((remote.scanSettings||{}).updatedAt||0) > ((local.scanSettings||{}).updatedAt||0) ? remote.scanSettings : local.scanSettings,
+    scanSettings: local.scanSettings, // clés API : restent sur ce téléphone, jamais dans le cloud
     autoReply: ((remote.autoReply||{}).updatedAt||0) > ((local.autoReply||{}).updatedAt||0) ? remote.autoReply : local.autoReply,
     callReply: ((remote.callReply||{}).updatedAt||0) > ((local.callReply||{}).updatedAt||0) ? remote.callReply : local.callReply,
     robotJobs: mergeNewest(local.robotJobs, remote.robotJobs).filter(j => j.at > Date.now() - 14*864e5),
@@ -1411,6 +1411,55 @@ function normalizeRemote(r){
   return r;
 }
 
+// --- Envoi par morceaux ------------------------------------------------------
+// Firebase refuse une écriture trop volumineuse (erreur 400 « Data to write
+// exceeds the maximum size... »). On n'envoie donc plus tout d'un seul bloc :
+// chaque rubrique part séparément, et une rubrique trop grosse (ex. une base
+// de milliers de numéros) est effacée puis renvoyée en plusieurs lots.
+const SYNC_CHUNK = 700000; // ~700 Ko maximum par requête
+function syncNodeUrl(code, path){
+  const p = path ? '/' + path.split('/').map(encodeURIComponent).join('/') : '';
+  return `${SYNC_DB_URL}/${SYNC_PATH}/${encodeURIComponent(code)}${p}.json`;
+}
+async function syncSend(code, path, method, body){
+  const opts = method === 'DELETE' ? { method } : { method, headers: { 'Content-Type': 'application/json' }, body };
+  const r = await syncRequest(syncNodeUrl(code, path), opts);
+  if(!r.ok) throw syncHttpError(r);
+}
+async function syncPutNode(code, path, value){
+  const body = JSON.stringify(value);
+  if(body === undefined || body.length <= SYNC_CHUNK || value === null || typeof value !== 'object'){
+    return syncSend(code, path, 'PUT', body === undefined ? 'null' : body);
+  }
+  await syncSend(code, path, 'DELETE');
+  const entries = Array.isArray(value) ? value.map((v, i) => [String(i), v]) : Object.entries(value);
+  let batch = {}, size = 0;
+  const flush = async () => { if(size){ await syncSend(code, path, 'PATCH', JSON.stringify(batch)); batch = {}; size = 0; } };
+  for(const [k, v] of entries){
+    const s = JSON.stringify(v);
+    if(s === undefined) continue;
+    if(s.length > SYNC_CHUNK){ await flush(); await syncPutNode(code, path + '/' + k, v); continue; }
+    if(size + s.length > SYNC_CHUNK) await flush();
+    batch[k] = v; size += s.length + k.length + 4;
+  }
+  await flush();
+}
+async function syncPushChunked(code, data){
+  // scanSettings (clés API) n'est plus jamais envoyé ; null = supprime les anciennes copies du cloud.
+  let batch = { scanSettings: null }, size = 0;
+  const big = [];
+  for(const k of Object.keys(data)){
+    if(k === 'scanSettings') continue;
+    const s = JSON.stringify(data[k]);
+    if(s === undefined) continue;
+    if(s.length > SYNC_CHUNK){ big.push(k); continue; }
+    if(size + s.length > SYNC_CHUNK){ await syncSend(code, '', 'PATCH', JSON.stringify(batch)); batch = {}; size = 0; }
+    batch[k] = data[k]; size += s.length;
+  }
+  await syncSend(code, '', 'PATCH', JSON.stringify(batch));
+  for(const k of big) await syncPutNode(code, k, data[k]);
+}
+
 // Synchronisation complète : récupère le cloud, fusionne avec les données
 // locales (rien n'est perdu d'aucun côté), applique le résultat ici, puis
 // renvoie ce résultat fusionné vers le cloud pour que tout le monde
@@ -1450,12 +1499,7 @@ async function syncNow(code, opts){
     if(changed) refreshEverything();
 
     // 3) Envoi du résultat fusionné.
-    const put = await syncRequest(syncUrl(code), {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(db)
-    });
-    if(!put.ok) throw syncHttpError(put);
+    await syncPushChunked(code, db);
 
     syncLastMsg = '';
     updateSyncStatus('✅ Synchronisé à ' + new Date().toLocaleTimeString());
