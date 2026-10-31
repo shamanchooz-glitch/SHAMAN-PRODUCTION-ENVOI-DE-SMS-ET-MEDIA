@@ -1,4 +1,4 @@
-const CACHE = 'shaman-production-v50';
+const CACHE = 'shaman-production-v51';
 // Everything this app needs is local — no CDN dependency at all — so a
 // full precache at install time is enough to make it open and work
 // completely offline immediately after installation.
@@ -9,6 +9,7 @@ const ASSETS = [
   './icon.png',
   './icon-maskable.png',
   './avatar.png',
+  './shaman-bot.js',
 ];
 
 const OFFLINE_FALLBACK = new Response(
@@ -20,7 +21,7 @@ const OFFLINE_FALLBACK = new Response(
 );
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)));
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS.map((u) => new Request(u, { cache: 'reload' })))));
   self.skipWaiting();
 });
 
