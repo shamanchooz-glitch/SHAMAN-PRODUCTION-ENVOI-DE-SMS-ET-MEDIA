@@ -769,7 +769,7 @@
       <h2>⚙️ Réglages</h2>
       <label>Délai avant de répondre à un même numéro (heures) — évite de répéter la même réponse</label>
       <input type="number" id="arCooldown" min="0" max="720">
-      <label>Maximum de réponses par jour (tous numéros) — protège contre un blocage opérateur</label>
+      <label>Maximum de réponses par jour (tous numéros) — protège contre un blocage opérateur. Ne concerne pas l'assistant : ses conversations n'ont pas de plafond.</label>
       <input type="number" id="arMaxDay" min="1" max="2000">
       <label>Attente avant d'envoyer la réponse (secondes, 0 à 5)</label>
       <input type="number" id="arDelay" min="0" max="5">
@@ -863,7 +863,7 @@
       <h2>⚙️ Réglages</h2>
       <label>Délai avant de renvoyer le même message à un même numéro (heures) — évite d'envoyer dix SMS à quelqu'un qui rappelle dix fois</label>
       <input type="number" id="crCooldown" min="0" max="720">
-      <label>Maximum de réponses par jour (tous numéros) — protège votre crédit et contre un blocage opérateur</label>
+      <label>Maximum de réponses par jour (tous numéros) — protège votre crédit et contre un blocage opérateur. Ne concerne pas l'assistant : ses conversations n'ont pas de plafond.</label>
       <input type="number" id="crMaxDay" min="1" max="2000">
       <label>Attente avant d'envoyer la réponse (secondes, 0 à 4)</label>
       <input type="number" id="crDelay" min="0" max="4">
@@ -1929,7 +1929,7 @@ smsBody.addEventListener('input', () => {
    Dans l'APK, window.ShamanNative existe : les SMS partent directement,
    sans ouvrir l'appli SMS, avec choix automatique de la SIM. */
 const NATIVE = !!window.ShamanNative;
-const APP_VERSION = '1.23';
+const APP_VERSION = '1.24';
 const nativeCbs = {};
 window.onShamanSms = function(json){
   try{ const e = JSON.parse(json); const cb = nativeCbs[e.id]; if(cb) cb(e); if(e.type === 'done') delete nativeCbs[e.id]; }catch(err){}
@@ -5341,7 +5341,7 @@ function crRefreshStatus(){
   pb.style.display = (!perm && crEnabled()) ? 'inline-block' : 'none';
   if(!crEnabled()) el.textContent = '⏸ Désactivé : le téléphone ne répond pas aux appels manqués.';
   else if(!perm) el.textContent = "⚠️ Autorisations manquantes : touchez « Autoriser les appels et les SMS » (état du téléphone, journal d'appels et envoi de SMS).";
-  else el.textContent = `✅ Actif : le téléphone répond aux appels non décrochés quand un statut est actif, même application fermée. Réponses envoyées aujourd'hui : ${st.today || 0}.`;
+  else el.textContent = `✅ Actif : le téléphone répond aux appels non décrochés quand un statut est actif (si l'assistant est activé, c'est lui qui répond à tous les appels manqués), même application fermée. Réponses envoyées aujourd'hui : ${st.today || 0}.`;
 }
 function crUntilFromUI(){
   const v = byId('crDur').value, now = Date.now();

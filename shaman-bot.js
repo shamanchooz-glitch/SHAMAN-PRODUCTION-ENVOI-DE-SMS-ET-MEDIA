@@ -976,7 +976,7 @@ function adminView(tab) {
       var lab = el('label'); lab.style.cssText = 'display:block;margin:16px 0 8px'; var cb = el('input'); cb.type = 'checkbox';
       try { cb.checked = !!X.botSmsGet(); } catch (e) {}
       cb.onchange = function () { try { X.botSmsSet(cb.checked); } catch (e) {} };
-      lab.appendChild(cb); lab.appendChild(D.createTextNode(' Répondre aux SMS reçus avec l’assistant (chaque réponse envoie un SMS : du crédit est consommé)')); bd.appendChild(lab);
+      lab.appendChild(cb); lab.appendChild(D.createTextNode(' Répondre aux SMS reçus et aux appels manqués avec l’assistant, et continuer la conversation sans limite par numéro (chaque réponse envoie un SMS : du crédit est consommé)')); bd.appendChild(lab);
       var ti = el('input'); ti.type = 'text'; ti.placeholder = 'Tester : écrivez un SMS reçu'; ti.style.cssText = 'width:100%;box-sizing:border-box;padding:10px;border:1.5px solid #B8DCEC;border-radius:8px;font-size:15px';
       var tbn = el('button', null, 'Tester la réponse SMS'); tbn.style.marginTop = '6px'; var tout = el('div', 'sb-d'); tout.style.marginTop = '8px';
       tbn.onclick = function () { try { tout.textContent = X.botTest(ti.value) || '(aucune réponse)'; } catch (e) { tout.textContent = 'Erreur de test'; } };
