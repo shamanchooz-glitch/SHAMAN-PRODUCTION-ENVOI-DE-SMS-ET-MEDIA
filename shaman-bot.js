@@ -878,6 +878,33 @@ var UI = {}, CSS = [
 '.sb-seg button{border:1.5px solid #B8DCEC;background:#F3FAFF;color:#43647F;border-radius:10px;padding:10px 8px;font-size:13.5px;font-weight:600;white-space:nowrap;cursor:pointer}',
 'body.sb-on #journalFab{display:none!important}',
 '.sb-seg button.on{background:linear-gradient(135deg,#F0528C,#2496C7);border-color:transparent;color:#fff}',
+'.sb-seg button[data-v="conv"]{grid-column:1/-1}',
+'.sb-box.sb-tall{height:min(84vh,760px);height:min(84dvh,760px)}',
+'.cv-hint{font-size:13px;color:#43647F;margin:0 0 10px;line-height:1.45}',
+'.cv-warn{font-size:13px;color:#9A3412;background:#FFF1E6;border-radius:8px;padding:8px 10px;margin:0 0 10px;line-height:1.4}',
+'.cv-row{background:#fff;border:1px solid #B8DCEC;border-radius:12px;padding:10px 12px;margin-bottom:8px;cursor:pointer}',
+'.cv-row.unread{border-color:#F0528C;box-shadow:0 0 0 1px #F0528C inset}',
+'.cv-row:focus-visible{outline:2px solid #F0528C}',
+'.cv-top{display:flex;align-items:center;gap:8px}',
+'.cv-top b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px}',
+'.cv-top span{font-size:12px;color:#43647F;white-space:nowrap}',
+'.cv-top .cv-badge{background:#F0528C;color:#fff;border-radius:10px;padding:1px 7px;font-weight:700}',
+'.cv-top .cv-pause{background:#FFF1E6;color:#9A3412;border-radius:8px;padding:1px 6px}',
+'.cv-num{font-size:12px;color:#43647F}',
+'.cv-pre{font-size:13.5px;color:#0F2436;opacity:.85;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+'#sb-a .tb.cv-tb{padding:8px 12px;align-items:center}',
+'#sb-a .tb .cv-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+'.cv-state{font-size:12px;color:#43647F;padding:6px 12px;background:#F3FAFF;border-bottom:1px solid #B8DCEC;line-height:1.35}',
+'#sb-a .cv-msgs{display:flex;flex-direction:column;gap:6px;padding:10px 12px}',
+'.cv-b{max-width:84%;padding:8px 12px;border-radius:14px;white-space:pre-wrap;word-wrap:break-word;font-size:15px;line-height:1.35}',
+'.cv-in{align-self:flex-start;background:#fff;border-bottom-left-radius:4px}',
+'.cv-bot,.cv-auto{align-self:flex-end;background:#CBE9F5;border-bottom-right-radius:4px}',
+'.cv-me{align-self:flex-end;background:#1A7DA8;color:#fff;border-bottom-right-radius:4px}',
+'.cv-meta{display:block;font-size:11px;opacity:.7;margin-top:3px}',
+'.cv-day,.cv-sys{align-self:center;font-size:12px;color:#43647F;background:rgba(255,255,255,.85);border-radius:10px;padding:2px 10px;text-align:center}',
+'.cv-err{color:#C93C52;font-size:13px;padding:2px 12px;background:#EAF5FC}.cv-err:empty{display:none}',
+'.cv-act{padding:6px 12px 0;background:#EAF5FC}',
+'#sb-a .cv-act button{border:1.5px solid #1A7DA8;background:#fff;color:#1A7DA8;border-radius:8px;padding:7px 10px;font-size:13.5px;cursor:pointer}',
 '.sb-box{position:relative;display:flex;flex-direction:column;height:min(72vh,620px);height:min(72dvh,620px);min-height:360px;background:#EAF5FC;border:1px solid #B8DCEC;border-radius:14px;overflow:hidden}',
 '@media(prefers-reduced-motion:no-preference){.sb-b{animation:sbin .18s ease-out}@keyframes sbin{from{opacity:0;transform:translateY(4px)}}}'
 ].join('');
@@ -955,6 +982,11 @@ function dosCard(bd, d, tag) {
   var cp = el('button', null, 'Copier'); cp.style.marginTop = '6px'; cp.onclick = function () { copy(txt, cp); }; card.appendChild(cp); bd.appendChild(card);
 }
 function adminView(tab) {
+  if (EMB && tab === 'conv') {
+    Object.keys(UI.seg).forEach(function (k) { UI.seg[k].b.className = (k === tab) ? 'on' : ''; });
+    convRoot(UI.a); refreshSeg(); return;
+  }
+  convStop();
   var A = UI.a; A.textContent = ''; A.classList.add('on');
   var tb = el('div', 'tb'), bd = el('div', 'bd'), nd = natJSON('botDossiers'), unk = unknownList();
   if (EMB) Object.keys(UI.seg).forEach(function (k) { UI.seg[k].b.className = (k === tab) ? 'on' : ''; });
@@ -1020,11 +1052,16 @@ function refreshSeg() {
   if (!EMB || !UI.seg) return;
   UI.seg.dos.b.textContent = '📁 Dossiers (' + (S.dossiers.length + natJSON('botDossiers').length) + ')';
   UI.seg.learn.b.textContent = '🧠 À apprendre (' + unknownList().length + ')';
+  var X = natConv();
+  if (X && UI.seg.conv) {
+    var nu = 0; try { nu = X.chatUnread() | 0; } catch (e) {}
+    UI.seg.conv.b.textContent = '📨 Conversations' + (nu > 0 ? ' • ' + nu + ' non lu' + (nu > 1 ? 's' : '') : '');
+  }
 }
 function showView(v) {
   if (!EMB) return;
   Object.keys(UI.seg).forEach(function (k) { UI.seg[k].b.className = (k === v) ? 'on' : ''; });
-  if (v === 'chat') { UI.a.classList.remove('on'); UI.m.scrollTop = UI.m.scrollHeight; refreshSeg(); } else adminView(v);
+  if (v === 'chat') { convStop(); UI.a.classList.remove('on'); UI.m.scrollTop = UI.m.scrollHeight; refreshSeg(); } else adminView(v);
 }
 function greetInto(c) {
   var hr = new Date().getHours();
@@ -1034,8 +1071,10 @@ function greetInto(c) {
 function buildEmbed(host) {
   EMB = true; UI.title = el('b'); UI.seg = {};
   var root = el('div', 'sb-emb'), seg = el('div', 'sb-seg'), box = el('div', 'sb-box');
-  [['chat', '💬 Discussion'], ['instr', '⚙ Instructions'], ['dos', '📁 Dossiers'], ['learn', '🧠 À apprendre']].forEach(function (t) {
-    var b = el('button', t[0] === 'chat' ? 'on' : '', t[1]); b.onclick = function () { showView(t[0]); }; seg.appendChild(b); UI.seg[t[0]] = { b: b };
+  var segs = [['chat', '💬 Discussion'], ['instr', '⚙ Instructions'], ['dos', '📁 Dossiers'], ['learn', '🧠 À apprendre']];
+  if (natConv()) segs.unshift(['conv', '📨 Conversations']);
+  segs.forEach(function (t) {
+    var b = el('button', t[0] === 'chat' ? 'on' : '', t[1]); b.setAttribute('data-v', t[0]); b.onclick = function () { showView(t[0]); }; seg.appendChild(b); UI.seg[t[0]] = { b: b };
   });
   UI.m = el('div'); UI.m.id = 'sb-m'; UI.m.setAttribute('aria-live', 'polite');
   UI.c = el('div'); UI.c.id = 'sb-c';
@@ -1043,6 +1082,7 @@ function buildEmbed(host) {
   var sd = el('button', null, '➤'); sd.setAttribute('aria-label', 'Envoyer'); f.appendChild(UI.in); f.appendChild(sd);
   UI.a = el('div'); UI.a.id = 'sb-a';
   box.appendChild(UI.m); box.appendChild(UI.c); box.appendChild(f); box.appendChild(UI.a);
+  UI.box = box;
   root.appendChild(seg); root.appendChild(box); host.appendChild(root);
   var go = function () { var v = UI.in.value.trim(); if (v) { UI.in.value = ''; say(v); } };
   sd.onclick = go; UI.in.onkeydown = function (e) { if (e.key === 'Enter') { e.preventDefault(); go(); } };
@@ -1053,6 +1093,161 @@ function buildEmbed(host) {
   if (tb) tb.addEventListener('click', function () { setTimeout(function () { UI.m.scrollTop = UI.m.scrollHeight; refreshSeg(); }, 60); });
   D.querySelectorAll('.tab-btn').forEach(function (bt) { bt.addEventListener('click', function () { D.body.classList.toggle('sb-on', bt.getAttribute('data-tab') === 'assistant'); }); });
   if (W.location && W.location.hash === '#assistant' && tb) tb.click();
+  if (natConv() && typeof setInterval === 'function') { badge(); setInterval(badge, 8000); }
+}
+
+/* ---- onglet « Conversations » : ce que le chatbot a dit à chaque numéro, et possibilité de répondre soi-même ---- */
+var CV = { A: null, body: null, tail: null, sig: '', timer: null, inp: null, msgs: null, title: null, tg: null, state: null, err: null, errT: null, bot: true, busy: false };
+function natConv() { var X = nat(); return X && typeof X.chatList === 'function' ? X : null; }
+function pj(t, d) { try { return JSON.parse(t); } catch (e) { return d; } }
+function two(n) { return (n < 10 ? '0' : '') + n; }
+function hhmm(t) { var d = new Date(t); return two(d.getHours()) + ':' + two(d.getMinutes()); }
+function dayKey(t) { var d = new Date(t); return d.getFullYear() + '-' + d.getMonth() + '-' + d.getDate(); }
+function dayLabel(t) {
+  var k = dayKey(t), d = new Date(t);
+  if (k === dayKey(Date.now())) return 'Aujourd’hui';
+  if (k === dayKey(Date.now() - 86400000)) return 'Hier';
+  return two(d.getDate()) + '/' + two(d.getMonth() + 1) + '/' + d.getFullYear();
+}
+function shortT(t) {
+  if (!t) return '';
+  var k = dayKey(t), d = new Date(t);
+  if (k === dayKey(Date.now())) return hhmm(t);
+  if (k === dayKey(Date.now() - 86400000)) return 'Hier';
+  return two(d.getDate()) + '/' + two(d.getMonth() + 1);
+}
+function convStop() { if (CV.timer) { clearInterval(CV.timer); CV.timer = null; } if (UI.box) UI.box.classList.remove('sb-tall'); }
+function convStart() { convStop(); if (UI.box) UI.box.classList.add('sb-tall'); CV.timer = setInterval(convTick, 3000); }
+function convTick() {
+  if (!CV.A || !CV.A.offsetParent) return;
+  if (CV.tail) paintThread(false); else paintList(false);
+}
+function convRoot(A) {
+  CV.A = A; A.textContent = ''; A.classList.add('on');
+  if (!natConv()) {
+    var bd = el('div', 'bd'); bd.appendChild(el('p', null, 'Cette fonction est disponible dans l’application Android SHAMAN SMS.')); A.appendChild(bd); return;
+  }
+  convStart(); showList();
+}
+function showList() {
+  var A = CV.A; A.textContent = ''; CV.tail = null; CV.sig = '';
+  CV.body = el('div', 'bd'); A.appendChild(CV.body);
+  paintList(true);
+}
+function paintList(force) {
+  var X = natConv(); if (!X || !CV.body) return;
+  var raw = '[]'; try { raw = X.chatList() || '[]'; } catch (e) {}
+  if (!force && raw === CV.sig) return;
+  CV.sig = raw;
+  var rows = pj(raw, []), bd = CV.body, keep = bd.scrollTop;
+  bd.textContent = '';
+  bd.appendChild(el('p', 'cv-hint', 'Voici ce que le chatbot a échangé avec chaque numéro. Touchez une conversation pour la lire, écrire vous-même ou mettre le chatbot en pause pour ce numéro.'));
+  var on = false; try { on = !!X.botSmsGet(); } catch (e) {}
+  if (!on) bd.appendChild(el('div', 'cv-warn', '⚠ Le chatbot ne répond pas encore aux SMS. Cochez « Répondre aux SMS reçus et aux appels manqués avec l’assistant » dans ⚙ Instructions.'));
+  if (!rows.length) { bd.appendChild(el('p', 'cv-hint', 'Aucune conversation pour le moment. Elles apparaissent dès que le chatbot répond à un SMS ou à un appel manqué.')); return; }
+  rows.forEach(function (r) {
+    var c = el('div', 'cv-row' + (r.unread > 0 ? ' unread' : '')), top = el('div', 'cv-top');
+    c.setAttribute('role', 'button'); c.tabIndex = 0;
+    top.appendChild(el('b', null, r.name || r.num));
+    if (r.bot === false) top.appendChild(el('span', 'cv-pause', '⏸ Pause'));
+    if (r.unread > 0) top.appendChild(el('span', 'cv-badge', String(r.unread)));
+    top.appendChild(el('span', null, shortT(r.t)));
+    c.appendChild(top);
+    if (r.name) c.appendChild(el('div', 'cv-num', r.num));
+    c.appendChild(el('div', 'cv-pre', (r.ld === 'me' ? 'Vous : ' : r.ld === 'in' ? '' : '🤖 ') + (r.last || '')));
+    c.onclick = function () { showThread(r.tail); };
+    c.onkeydown = function (e) { if (e.key === 'Enter') showThread(r.tail); };
+    bd.appendChild(c);
+  });
+  bd.scrollTop = keep;
+}
+function showThread(tail) {
+  var A = CV.A; A.textContent = ''; CV.tail = tail; CV.sig = ''; CV.busy = false;
+  var tb = el('div', 'tb cv-tb'), back = el('button', null, '← Retour');
+  back.onclick = function () { showList(); refreshSeg(); };
+  CV.title = el('b', 'cv-title', '');
+  CV.tg = el('button', 'on', ''); CV.tg.onclick = toggleBot;
+  var del = el('button', null, '🗑'); del.setAttribute('aria-label', 'Supprimer cette conversation');
+  del.onclick = function () {
+    if (!W.confirm('Supprimer cette conversation de la liste ? (Les SMS déjà envoyés ne sont pas annulés.)')) return;
+    var X = natConv(); if (X) { try { X.chatDelete(CV.tail); } catch (e) {} }
+    showList(); refreshSeg();
+  };
+  tb.appendChild(back); tb.appendChild(CV.title); tb.appendChild(CV.tg); tb.appendChild(del); A.appendChild(tb);
+  CV.state = el('div', 'cv-state'); A.appendChild(CV.state);
+  CV.msgs = el('div', 'bd cv-msgs'); A.appendChild(CV.msgs);
+  CV.err = el('div', 'cv-err'); A.appendChild(CV.err);
+  var act = el('div', 'cv-act'), bb = el('button', null, '🤖 Faire répondre le chatbot'); bb.onclick = botNow; act.appendChild(bb); A.appendChild(act);
+  var f = el('div', 'sb-i'); CV.inp = el('input'); CV.inp.type = 'text'; CV.inp.placeholder = 'Écrire un SMS à cette personne…'; CV.inp.setAttribute('enterkeyhint', 'send');
+  var sd = el('button', null, '➤'); sd.setAttribute('aria-label', 'Envoyer le SMS'); f.appendChild(CV.inp); f.appendChild(sd); A.appendChild(f);
+  sd.onclick = sendNow; CV.inp.onkeydown = function (e) { if (e.key === 'Enter') { e.preventDefault(); sendNow(); } };
+  paintThread(true);
+  // Remonte la conversation à l'écran : le champ d'écriture en bas reste visible sans faire défiler la page.
+  setTimeout(function () { try { if (UI.box && UI.box.scrollIntoView) UI.box.scrollIntoView({ block: 'end' }); } catch (e) {} }, 60);
+}
+function paintToggle() {
+  CV.tg.textContent = CV.bot ? '🤖 Auto : activé' : '⏸ Auto : en pause';
+  CV.tg.className = CV.bot ? 'on' : '';
+  CV.state.textContent = CV.bot
+    ? 'Les réponses automatiques sont actives pour ce numéro (selon vos réglages). Vous pouvez aussi écrire vous-même : vos messages partent par SMS.'
+    : 'En pause : le chatbot ne répond plus à ce numéro et les messages reçus s’affichent ici. Répondez vous-même, ou touchez « Faire répondre le chatbot » pour une réponse.';
+}
+function paintThread(force) {
+  var X = natConv(); if (!X || !CV.tail || !CV.msgs) return;
+  var raw = '{}'; try { raw = X.chatThread(CV.tail) || '{}'; } catch (e) {}
+  if (!force && raw === CV.sig) return;
+  CV.sig = raw;
+  var th = pj(raw, {}), ms = th.msgs || [], box = CV.msgs;
+  var near = force || (box.scrollHeight - box.scrollTop - box.clientHeight < 80);
+  CV.title.textContent = th.name || th.num || CV.tail;
+  CV.bot = th.bot !== false; paintToggle();
+  box.textContent = '';
+  var day = '';
+  ms.forEach(function (m) {
+    var dk = dayKey(m.t);
+    if (dk !== day) { day = dk; box.appendChild(el('div', 'cv-day', dayLabel(m.t))); }
+    if (m.d === 'sys') { box.appendChild(el('div', 'cv-sys', m.x + ' • ' + hhmm(m.t))); return; }
+    var b = el('div', 'cv-b cv-' + m.d, m.x);
+    var tag = m.d === 'bot' ? '🤖 Chatbot' : m.d === 'auto' ? '⚙️ Réponse automatique' : m.d === 'me' ? '✍️ Vous' : '';
+    b.appendChild(el('span', 'cv-meta', (tag ? tag + ' • ' : '') + hhmm(m.t)));
+    box.appendChild(b);
+  });
+  if (near) box.scrollTop = box.scrollHeight;
+}
+function flash(t) {
+  CV.err.textContent = t;
+  if (CV.msgs) CV.msgs.scrollTop = CV.msgs.scrollHeight;
+  if (CV.errT) clearTimeout(CV.errT);
+  CV.errT = setTimeout(function () { if (CV.err) CV.err.textContent = ''; }, 7000);
+}
+function toggleBot() {
+  var X = natConv(); if (!X || !CV.tail) return;
+  CV.bot = !CV.bot;
+  try { X.chatSetBot(CV.tail, CV.bot); } catch (e) {}
+  paintToggle();
+}
+function sendNow() {
+  var X = natConv(); if (!X || !CV.tail || CV.busy) return;
+  var v = CV.inp.value.trim(); if (!v) return;
+  CV.busy = true;
+  var r = { ok: false, err: 'Envoi impossible.' };
+  try { r = pj(X.chatSend(CV.tail, v), r); } catch (e) {}
+  CV.busy = false;
+  if (r.ok) { CV.inp.value = ''; CV.err.textContent = ''; paintThread(true); } else flash(r.err || 'Envoi impossible.');
+}
+function botNow() {
+  var X = natConv(); if (!X || !CV.tail || CV.busy) return;
+  CV.busy = true;
+  var r = { ok: false, err: 'Le chatbot n’a pas pu répondre.' };
+  try { r = pj(X.chatBotReply(CV.tail), r); } catch (e) {}
+  CV.busy = false;
+  if (r.ok) { CV.err.textContent = ''; paintThread(true); } else flash(r.err || 'Le chatbot n’a pas pu répondre.');
+}
+function badge() {
+  var X = natConv(), b = D.querySelector('[data-tab="assistant"]'); if (!X || !b) return;
+  var n = 0; try { n = X.chatUnread() | 0; } catch (e) {}
+  var t = '🧠 Assistant' + (n > 0 ? ' • ' + n : '');
+  if (b.textContent !== t) b.textContent = t;
 }
 function copy(t, b) {
   var done = function () { b.textContent = 'Copié ✓'; };
