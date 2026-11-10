@@ -514,6 +514,52 @@
       <select id="smsTplSelect" style="margin-bottom:8px;"><option value="">— Insérer un modèle —</option></select>
       <textarea id="smsBody" placeholder="Votre message…"></textarea>
       <div class="counter" id="smsCounter">0 caractère · 1 SMS</div>
+      <div id="mxBox" style="display:none;margin-top:10px;">
+        <label style="margin-top:0;">✨ Générer un message (moteur XL)</label>
+        <div style="display:flex;gap:6px;margin-bottom:6px;">
+          <select id="mxCat" style="flex:1;min-width:0;"><option value="">Tous les sujets</option></select>
+          <select id="mxAng" style="flex:1;min-width:0;"><option value="">Tous les tons</option></select>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <select id="mxReg" style="flex:0 0 auto;"><option value="0">Vouvoiement</option><option value="1">Tutoiement</option></select>
+          <button type="button" class="btn btn-secondary" id="mxGen" style="flex:1;">✨ Générer</button>
+        </div>
+        <div class="hint" id="mxInfo" style="margin-top:6px;"></div>
+      </div>
+      <script>
+      /* Générateur de messages (moteur XL) : pont Android si disponible, sinon moteur JavaScript (shaman-moteur.js) de l'application web. */
+      window.addEventListener('load', function(){
+        try{
+          var NB = window.ShamanNative, MJ = window.ShamanMoteurJS, API = null;
+          if(NB && NB.moteurXlCatalogue){
+            API = {
+              cat: function(){ return JSON.parse(NB.moteurXlCatalogue() || '{}'); },
+              inf: function(){ return JSON.parse(NB.moteurXlInfo() || '{}'); },
+              gen: function(c, a, tu){ return NB.moteurXlGenerer(c, a, true, tu); }
+            };
+          } else if(MJ && MJ.xlCatalogue){
+            API = { cat: MJ.xlCatalogue, inf: MJ.xlInfo, gen: function(c, a, tu){ return MJ.xlGenerer(c, a, true, tu); } };
+          }
+          if(!API) return;
+          var cat = API.cat();
+          if(!cat.categories || !cat.angles) return;
+          var sc = document.getElementById('mxCat'), sa = document.getElementById('mxAng');
+          cat.categories.forEach(function(c){ var o = document.createElement('option'); o.value = c; o.textContent = c; sc.appendChild(o); });
+          cat.angles.forEach(function(a){ var o = document.createElement('option'); o.value = a; o.textContent = a; sa.appendChild(o); });
+          document.getElementById('mxBox').style.display = '';
+          try{
+            var inf = API.inf();
+            if(inf.competences){ document.getElementById('mxInfo').textContent = inf.competences + ' compétences · ' + Number(inf.variantesSujets).toLocaleString('fr-FR') + ' variantes de sujets · ' + Number(inf.messagesPossibles).toLocaleString('fr-FR') + ' messages possibles'; }
+          }catch(e){}
+          document.getElementById('mxGen').addEventListener('click', function(){
+            var t = '';
+            try{ t = API.gen(sc.value, sa.value, document.getElementById('mxReg').value === '1'); }catch(e){}
+            var ta = document.getElementById('smsBody');
+            if(t && ta){ ta.value = t; ta.dispatchEvent(new Event('input')); }
+          });
+        }catch(e){}
+      });
+      </script>
     </div>
     <div class="card">
       <h2>📱 Cartes SIM (SIM 1 / SIM 2)</h2>
@@ -5578,6 +5624,7 @@ document.getElementById('checkUpdateBtn').addEventListener('click', async () => 
 });
 </script>
 <script src="shaman-skills.js" charset="utf-8"></script>
+<script src="shaman-moteur.js" charset="utf-8"></script>
 <script src="shaman-bot.js" charset="utf-8"></script>
 </body>
 </html>

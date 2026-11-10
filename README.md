@@ -61,8 +61,10 @@ sur Envoyer.
 ## Publier sur GitHub Pages
 
 1. Créez un dépôt GitHub public (ex. `shaman-production-app`).
-2. Déposez les 6 fichiers de ce dossier (`index.html`, `manifest.json`,
-   `icon.png`, `icon-maskable.png`, `avatar.png`, `sw.js`) à la racine.
+2. Déposez les fichiers de ce dossier à la racine : `index.html`, `manifest.json`,
+   `icon.png`, `icon-maskable.png`, `avatar.png`, `sw.js`, ainsi que l'assistant :
+   `shaman-skills.js`, `shaman-moteur.js` (moteurs de conseil, de cours et de messages)
+   et `shaman-bot.js`. Ce sont les mêmes fichiers que dans l'application Android.
 3. **Settings → Pages** → source = branche `main`, dossier `/ (root)`.
 4. Votre lien sera du type :
    `https://<votre-nom-utilisateur>.github.io/shaman-production-app/`
