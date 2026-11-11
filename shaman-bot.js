@@ -1095,7 +1095,7 @@ function adminView(tab) {
     if (S.dossiers.length) { var all = el('button', 'pri', 'Copier tous les dossiers'); all.onclick = function () { copy(JSON.stringify(S.dossiers.concat(nd), null, 1), all); }; bd.appendChild(all); }
   } else if (tab === 'brain') {
     var Z = null; try { Z = (W.ShamanNative && W.ShamanNative.llmStatus) ? W.ShamanNative : null; } catch (e) { Z = null; }
-    bd.appendChild(el('p', null, 'Facultatif. Pour que l’assistant rédige des cours détaillés sur toutes les matières, enregistrez jusqu’à 4 clés API GRATUITES (sans carte bancaire) de services différents : Google Gemini (aistudio.google.com/apikey, clé AIza…), Groq (console.groq.com/keys, clé gsk_…), OpenRouter (openrouter.ai/keys, clé sk-or-…) et Cerebras (cloud.cerebras.ai, clé csk-…). L’assistant les utilise à tour de rôle et passe tout seul à la suivante si l’une est saturée ou refusée. Une clé Claude (sk-ant-…) fonctionne aussi mais elle est payante. Les clés restent sur ce téléphone ; seule la demande de cours est envoyée au service, jamais les SMS. Sans clé, l’assistant donne seulement le plan du cours, hors-ligne.'));
+    bd.appendChild(el('p', null, 'Facultatif. Pour que l’assistant rédige des cours détaillés sur toutes les matières, enregistrez jusqu’à 4 clés API GRATUITES (sans carte bancaire) de services différents : Google Gemini (aistudio.google.com/apikey, clé AIza…), Groq (console.groq.com/keys, clé gsk_…), OpenRouter (openrouter.ai/keys, clé sk-or-…), GitHub Models (github.com/settings/personal-access-tokens, permission Models en lecture, clé github_pat_…) et Cerebras (cloud.cerebras.ai, clé csk-…). L’assistant les utilise à tour de rôle et passe tout seul à la suivante si l’une est saturée ou refusée. Une clé Claude (sk-ant-…) fonctionne aussi mais elle est payante. Les clés restent sur ce téléphone ; seule la demande de cours est envoyée au service, jamais les SMS. Sans clé, l’assistant donne seulement le plan du cours, hors-ligne.'));
     if (!Z) { bd.appendChild(el('p', null, 'Cette fonction est disponible dans l’application Android.')); }
     else {
       var stt = {}; try { stt = JSON.parse(Z.llmStatus() || '{}'); } catch (e) { stt = {}; }
@@ -1109,7 +1109,7 @@ function adminView(tab) {
         var c = cles[n] || {};
         var lab = el('div', 'sb-d', 'Clé n°' + (n + 1) + ' : ' + (c.apercu ? ('✓ ' + (c.service || '') + ' (' + c.apercu + ')' + (c.attente ? ' • en pause quelques minutes' : '')) : 'vide'));
         lab.style.marginTop = '10px';
-        var ki = el('input'); ki.type = 'password'; ki.placeholder = c.apercu ? 'Coller une nouvelle clé pour la remplacer' : 'Coller la clé n°' + (n + 1) + ' (AIza…, gsk_…, sk-or-…, csk-…)'; ki.setAttribute('autocomplete', 'off'); ki.style.cssText = inpS;
+        var ki = el('input'); ki.type = 'password'; ki.placeholder = c.apercu ? 'Coller une nouvelle clé pour la remplacer' : 'Coller la clé n°' + (n + 1) + ' (gsk_…, sk-or-…, github_pat_…, AIza…, csk-…)'; ki.setAttribute('autocomplete', 'off'); ki.style.cssText = inpS;
         champs.push(ki);
         bd.appendChild(lab); bd.appendChild(ki);
         if (c.apercu) {
