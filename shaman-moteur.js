@@ -14,6 +14,8 @@ var DATA = {"vie": [["Communication", ["Écoute active|Écouter pour comprendre 
 var MOTS_VIDES = {}; ('aide alors arrive astuce astuces aux avance avec avoir besoin bien bonjour bonsoir car ce cela ces cet cette comme comment conseil conseils construire cours dans debutant des dois donc elle elles entre est etes etre faire fait ils intermediaire lecon lecons les leur leurs mais merci mes mon niveau nos notre nous par pas peux plus pour puis quand que quel quelle quelles quels qui quoi salut sans ses simple son sont souhaite suis sur svp tes ton tous tout tres une veux vos votre voudrais vous bon bonne bons bonnes petit petite grand grande nouveau nouvelle mieux aussi encore vraiment').split(' ').forEach(function (w) { MOTS_VIDES[w] = 1; });
 function normaliser(s) { return String(s).toLowerCase().normalize('NFD').replace(/\p{M}+/gu, ''); }
 function mots(s) { return normaliser(s).split(/[^a-z0-9]+/).filter(function (w) { return w.length > 2 && !MOTS_VIDES[w]; }); }
+function detailCours(t, p) { try { var C = (typeof window !== 'undefined' && window.SHAMAN_COURS) || (typeof globalThis !== 'undefined' && globalThis.SHAMAN_COURS); return (C && C[normaliser(t) + '|' + normaliser(p)]) || null; } catch (e) { return null; } }
+if (typeof document !== 'undefined' && typeof window !== 'undefined' && !window.SHAMAN_COURS) { try { var scC = document.createElement('script'); scC.src = 'shaman-cours.js'; scC.charset = 'utf-8'; document.head.appendChild(scC); } catch (e) {} }
 function racine(w) { var s = (w.length > 4 && (w.slice(-1) === 's' || w.slice(-1) === 'x')) ? w.slice(0, -1) : w; return s.slice(0, 6); }
 function racines(s) { var o = {}; mots(s).forEach(function (w) { o[racine(w)] = 1; }); return o; }
 var PHRASES = /(depuis )?(quelques? temps|longtemps|un moment)|de temps en temps|ces derniers temps|en ce moment/g;
@@ -92,29 +94,31 @@ function chercher(texte, cours, conseil, max) {
 function construireCours(s, niveau) {
   var obj = ['Idée clé : ' + s.essence, 'Points à maîtriser : ' + s.points.join(', ') + '.',
     niveau === 'avance' ? 'Analyser de façon critique et en voir les limites.' : niveau === 'intermediaire' ? 'Relier les notions entre elles et résoudre un cas pratique.' : 'Savoir appliquer l’essentiel dans une situation simple.'];
+  var nbDet = 0;
   var sections = s.points.map(function (p) {
+    var det = detailCours(s.titre, p); if (det) nbDet++;
     var ex = niveau === 'avance' ? 'Voyons « ' + p + ' » en profondeur : hypothèses, limites, débats actuels et applications avancées en ' + s.titre + '.'
       : niveau === 'intermediaire' ? 'Voyons « ' + p + ' » : son principe, son lien avec les autres notions de ' + s.titre + ', puis un cas pratique.'
       : 'Voyons « ' + p + ' » : une définition en une phrase, puis un exemple du quotidien lié à ' + s.titre + '.';
-    return { notion: p, explication: ex, controle: 'Question de contrôle : pouvez-vous expliquer « ' + p + ' » avec un exemple tiré de votre vie ou de votre métier ?' };
+    return { notion: p, explication: det ? (niveau === 'debutant' ? det : det + ' ' + ex) : ex, controle: 'Question de contrôle : pouvez-vous expliquer « ' + p + ' » avec un exemple tiré de votre vie ou de votre métier ?' };
   });
   var exo = niveau === 'avance' ? 'critiquez une démarche existante en ' + s.titre + ' et proposez une amélioration argumentée.'
     : niveau === 'intermediaire' ? 'rédigez un cas pratique qui mobilise au moins deux notions, puis corrigez-le.'
     : 'choisissez une situation réelle et appliquez-y les ' + s.points.length + ' points, un par un.';
-  return { titre: s.titre, niveau: niveau, objectifs: obj, sections: sections, exercice: exo, resume: s.essence + ' Points clés : ' + s.points.join(', ') + '.' };
+  return { titre: s.titre, niveau: niveau, objectifs: obj, sections: sections, exercice: exo, resume: s.essence + ' Points clés : ' + s.points.join(', ') + '.', detaille: nbDet > 0 };
 }
 var LIBELLE = { debutant: 'débutant', intermediaire: 'intermédiaire', avance: 'avancé' };
 
-function empaqueter(blocs, max) {
-  max = max || 560; var sortie = [], cur = '';
+function empaqueter(blocs, max, nmax) {
+  max = max || 560; nmax = nmax || 4; var sortie = [], cur = '';
   blocs.forEach(function (b) {
     var bb = b.length > max ? b.slice(0, max - 1) + '…' : b;
     if (cur && cur.length + 2 + bb.length > max) { sortie.push(cur); cur = ''; }
     if (cur) cur += '\n\n'; cur += bb;
   });
   if (cur) sortie.push(cur);
-  if (sortie.length <= 4) return sortie;
-  return sortie.slice(0, 3).concat([sortie.slice(3).join('\n\n').slice(0, 590)]);
+  if (sortie.length <= nmax) return sortie;
+  return sortie.slice(0, nmax - 1).concat([sortie.slice(nmax - 1).join('\n\n').slice(0, 590)]);
 }
 function messagesConseil(s) {
   var m = [];
@@ -129,7 +133,7 @@ function messagesCours(c, s) {
   c.sections.forEach(function (sec, i) { blocs.push((i + 1) + '. ' + maj(sec.notion) + '\n' + sec.explication); });
   var fin = 'Exercice : ' + c.exercice; if (c.sections.length) fin += '\n' + c.sections[0].controle; blocs.push(fin);
   var resume = 'Résumé : ' + c.resume, a = avertissement(s.categorie); if (a) resume += '\n' + a; blocs.push(resume);
-  return empaqueter(blocs);
+  return empaqueter(blocs, 560, c.detaille ? 10 : 4);
 }
 function chipsPour(s, niveau) {
   var l = [];
