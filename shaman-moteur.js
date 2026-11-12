@@ -100,7 +100,7 @@ function construireCours(s, niveau) {
     var ex = niveau === 'avance' ? 'Voyons « ' + p + ' » en profondeur : hypothèses, limites, débats actuels et applications avancées en ' + s.titre + '.'
       : niveau === 'intermediaire' ? 'Voyons « ' + p + ' » : son principe, son lien avec les autres notions de ' + s.titre + ', puis un cas pratique.'
       : 'Voyons « ' + p + ' » : une définition en une phrase, puis un exemple du quotidien lié à ' + s.titre + '.';
-    return { notion: p, explication: det ? (niveau === 'debutant' ? det : det + ' ' + ex) : ex, controle: 'Question de contrôle : pouvez-vous expliquer « ' + p + ' » avec un exemple tiré de votre vie ou de votre métier ?' };
+    return { notion: p, explication: det ? det : ex, controle: 'Question de contrôle : pouvez-vous expliquer « ' + p + ' » avec un exemple tiré de votre vie ou de votre métier ?' };
   });
   var exo = niveau === 'avance' ? 'critiquez une démarche existante en ' + s.titre + ' et proposez une amélioration argumentée.'
     : niveau === 'intermediaire' ? 'rédigez un cas pratique qui mobilise au moins deux notions, puis corrigez-le.'
@@ -133,7 +133,7 @@ function messagesCours(c, s) {
   c.sections.forEach(function (sec, i) { blocs.push((i + 1) + '. ' + maj(sec.notion) + '\n' + sec.explication); });
   var fin = 'Exercice : ' + c.exercice; if (c.sections.length) fin += '\n' + c.sections[0].controle; blocs.push(fin);
   var resume = 'Résumé : ' + c.resume, a = avertissement(s.categorie); if (a) resume += '\n' + a; blocs.push(resume);
-  return empaqueter(blocs, 560, c.detaille ? 10 : 4);
+  return c.detaille ? empaqueter(blocs, 600, 10) : empaqueter(blocs, 560, 4);
 }
 function chipsPour(s, niveau) {
   var l = [];
