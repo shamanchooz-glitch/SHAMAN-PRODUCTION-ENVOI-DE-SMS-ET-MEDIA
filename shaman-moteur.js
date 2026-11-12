@@ -1,4 +1,4 @@
-/*! Shaman Moteurs v1.29 — port JavaScript des deux moteurs de l'application Android
+/*! Shaman Moteurs v1.30 — port JavaScript des deux moteurs de l'application Android
  *  (ShamanMoteur.kt = conseil et cours, ShamanMoteurXL.kt = messages variés).
  *  Même algorithme, mêmes données : l'application web (PWA) répond comme l'application Android, hors-ligne.
  *  Charger AVANT shaman-bot.js :  <script src="shaman-moteur.js"></script>
@@ -12,7 +12,7 @@ var DATA = {"vie": [["Communication", ["Écoute active|Écouter pour comprendre 
 
 /* ================= Texte ================= */
 var MOTS_VIDES = {}; ('aide alors arrive astuce astuces aux avance avec avoir besoin bien bonjour bonsoir car ce cela ces cet cette comme comment conseil conseils construire cours dans debutant des dois donc elle elles entre est etes etre faire fait ils intermediaire lecon lecons les leur leurs mais merci mes mon niveau nos notre nous par pas peux plus pour puis quand que quel quelle quelles quels qui quoi salut sans ses simple son sont souhaite suis sur svp tes ton tous tout tres une veux vos votre voudrais vous bon bonne bons bonnes petit petite grand grande nouveau nouvelle mieux aussi encore vraiment').split(' ').forEach(function (w) { MOTS_VIDES[w] = 1; });
-function normaliser(s) { return String(s).toLowerCase().normalize('NFD').replace(/\p{M}+/gu, ''); }
+function normaliser(s) { return String(s).toLowerCase().replace(/œ/g, 'oe').replace(/æ/g, 'ae').normalize('NFD').replace(/\p{M}+/gu, ''); }
 function mots(s) { return normaliser(s).split(/[^a-z0-9]+/).filter(function (w) { return w.length > 2 && !MOTS_VIDES[w]; }); }
 function detailCours(t, p) { try { var C = (typeof window !== 'undefined' && window.SHAMAN_COURS) || (typeof globalThis !== 'undefined' && globalThis.SHAMAN_COURS); return (C && C[normaliser(t) + '|' + normaliser(p)]) || null; } catch (e) { return null; } }
 if (typeof document !== 'undefined' && typeof window !== 'undefined' && !window.SHAMAN_COURS) { try { var scC = document.createElement('script'); scC.src = 'shaman-cours.js'; scC.charset = 'utf-8'; document.head.appendChild(scC); } catch (e) {} }
@@ -49,7 +49,7 @@ function avertissement(categorie) {
   if (c.indexOf('emotion') >= 0) return 'Si la souffrance devient trop lourde ou si vous pensez à vous faire du mal, parlez-en tout de suite à une personne de confiance ou aux services d’urgence de votre pays.';
   if (c.indexOf('sante') >= 0 || c.indexOf('medecine') >= 0) return 'Ces repères sont généraux et ne remplacent pas l’avis d’un professionnel de santé. En cas de symptôme inquiétant ou d’urgence, contactez rapidement un médecin ou les secours.';
   if (c.indexOf('argent') >= 0 || c.indexOf('finance') >= 0 || c.indexOf('economie') >= 0 || c.indexOf('entrepreneuriat') >= 0) return 'Information générale, pas un conseil financier personnalisé : faites valider les décisions importantes par un professionnel agréé.';
-  if (c.indexOf('citoyennete') >= 0 || c.indexOf('droit') >= 0) return 'Les règles varient selon les pays : vérifiez auprès d’un juriste ou de l’administration compétente.';
+  if (c.indexOf('citoyennete') >= 0 || c.indexOf('droit') >= 0) return "Les règles varient selon les pays : vérifiez auprès d'un juriste ou de l'administration compétente.";
   return null;
 }
 function maj(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
@@ -123,7 +123,7 @@ function empaqueter(blocs, max, nmax) {
 function messagesConseil(s) {
   var m = [];
   m.push(s.type === 'univ' ? s.titre + ' (' + s.categorie + '). Compétence clé du professeur : ' + s.essence : s.titre + ' : ' + s.essence);
-  m.push((s.type === 'univ' ? 'Notions clés' : 'Plan d’action') + ' : ' + s.points.map(function (p, i) { return (i + 1) + ') ' + maj(p); }).join(' ; ') + '.');
+  m.push((s.type === 'univ' ? 'Notions clés' : "Plan d'action") + ' : ' + s.points.map(function (p, i) { return (i + 1) + ') ' + maj(p); }).join(' ; ') + '.');
   var a = avertissement(s.categorie); if (a) m.push(a);
   return m.map(function (x) { return x.slice(0, 600); });
 }
@@ -195,11 +195,18 @@ function conseilMeteo(m, tu) {
 function parties(index, ctx) {
   var v = index, tu = !!ctx.tu;
   function next(i) { var r = RAD[i], x = v % r; v = Math.floor(v / r); return x; }
-  var comp = COMP[next(0)], sujet = X.categories[comp.c][1][next(1)], cadre = X.cadres[next(2)], moment = X.moments[next(3)];
+  var comp = COMP[next(0)], sujet = X.categories[comp.c][1][next(1)], cadre = X.cadres[next(2)], momentTire = X.moments[next(3)];
+  /* message adressé à un proche ou demande directe : ni lieu ni moment tirés au hasard */
+  var neutre = !!(ctx.sansCorps || ctx.appel), moment = neutre ? "aujourd'hui" : momentTire;
   var profil = X.profils[next(4)], lieu = X.lieux[next(5)], iCorps = next(6), iOuv = next(7), iCons = next(8), iSalut = next(9);
-  var cloture = (tu ? X.cloturesTu : X.cloturesVous)[next(10)], emoji = X.emojis[next(11)], angle = X.angles[comp.a];
+  var iClo = next(10), emojiTire = X.emojis[next(11)], angle = X.angles[comp.a];
+  /* sympathie et réconfort : jamais de « Belle journée ! » ni de soleil, seulement des formules douces */
+  var doux = angle.nom === 'Sympathie' || angle.nom === 'Réconfort';
+  var cloture = (tu ? X.cloturesTu : X.cloturesVous)[doux ? [1, 2, 5][iClo % 3] : iClo];
+  var emoji = doux ? ['🌿', '🤝', '🙏'][X.emojis.indexOf(emojiTire) % 3] : emojiTire;
   var ouv = (tu ? angle.ouvTu : angle.ouvVous)[iOuv].split('{moment}').join(moment);
-  var cons = (tu ? angle.consTu : angle.consVous)[iCons].split('{lieu}').join(lieu);
+  var consBrut = (tu ? angle.consTu : angle.consVous)[iCons];
+  var cons = neutre ? consBrut.split(' {lieu}').join('') : consBrut.split('{lieu}').join(lieu);
   var salut = ctx.appel ? (ctx.appel + ' !') : (tu ? X.salutationsTu : X.salutationsVous)[iSalut].replace(' {p}', '');
   if (ctx.conversation) salut = '';
   var corps = maj((tu ? X.corpsTu : X.corpsVous)[iCorps].split('{sujet}').join(sujet).split('{cadre}').join(cadre));
@@ -288,16 +295,23 @@ function catDefaut(a) {
 function premier(liste, n) { for (var i = 0; i < liste.length; i++) if (liste[i][1].test(n)) return liste[i][0]; return null; }
 /* Destinataires : « message pour ma maman » → « Chère maman, » et tutoiement ; les catégories de personnes ne sont pas des sujets */
 var DEST = [
-  [/\b(maman|mere|mama|mamie|grand mere)\b/, 'Chère maman', true], [/\b(papa|pere|papi|grand pere)\b/, 'Cher papa', true],
+  [/\b(belle mere|belle maman)\b/, 'Chère belle-maman', false], [/\b(beau pere)\b/, 'Cher beau-père', false],
+  [/\b(grand mere|grand maman)\b/, 'Chère grand-mère', true], [/\b(grand pere)\b/, 'Cher grand-père', true], [/\b(grands parents)\b/, 'Chers grands-parents', false],
+  [/\b(mamie|mamy)\b/, 'Chère mamie', true], [/\b(papi|papy)\b/, 'Cher papi', true],
+  [/\b(maman|mere|mama)\b/, 'Chère maman', true], [/\b(papa|pere)\b/, 'Cher papa', true], [/\b(parents)\b/, 'Chers parents', false],
+  [/\b(tante|tantie)\b/, 'Chère tante', true], [/\b(oncle|tonton)\b/, 'Cher oncle', true],
+  [/\b(cousine)\b/, 'Chère cousine', true], [/\b(cousin)\b/, 'Cher cousin', true], [/\b(niece)\b/, 'Chère nièce', true], [/\b(neveu)\b/, 'Cher neveu', true],
   [/\b(amie|copine)\b/, 'Chère amie', true], [/\b(ami|copain|pote)\b/, 'Cher ami', true],
-  [/\b(soeur)\b/, 'Chère sœur', true], [/\b(frere)\b/, 'Cher frère', true], [/\b(epouse|femme|chérie)\b/, 'Chérie', true], [/\b(mari|epoux)\b/, 'Cher mari', true],
-  [/\b(fils|fille|enfants?)\b/, 'Mon enfant', true], [/\b(collegue)\b/, 'Cher collègue', false], [/\b(client|cliente)\b/, 'Cher client', false],
-  [/\b(candidat|candidate)\b/, 'Cher candidat', false], [/\b(patron|directeur|directrice|chef)\b/, 'Bonjour', false], [/\b(voisin|voisine)\b/, 'Cher voisin', false]
+  [/\b(soeur)\b/, 'Chère sœur', true], [/\b(frere)\b/, 'Cher frère', true], [/\b(epouse|femme|cherie)\b/, 'Chérie', true], [/\b(mari|epoux)\b/, 'Cher mari', true],
+  [/\b(enfants)\b/, 'Mes chers enfants', false], [/\b(fils|fille|enfant)\b/, 'Mon enfant', true], [/\b(collegue)\b/, 'Cher collègue', false], [/\b(client|cliente)\b/, 'Cher client', false],
+  [/\b(candidat|candidate)\b/, 'Cher candidat', false], [/\b(patron|patronne|directeur|directrice|chef)\b/, 'Bonjour', false],
+  [/\b(employe|employee|bonne|nounou|gardien|vigile|chauffeur|menagere|cuisinier|cuisiniere|jardinier)\b/, 'Bonjour', false],
+  [/\b(voisin|voisine)\b/, 'Cher voisin', false]
 ];
 var CAT_PERSONNES = { 'Famille': 1, 'Parents': 1, 'Enfants': 1, 'Amis': 1, 'Voisins et visiteurs': 1 };
 function destinataire(n) {
-  var m = /\bpour (ma|mon|mes|notre|nos|ta|ton|un|une|le|la|l)\b ?(.*)$/.exec(n); if (!m) return null;
-  for (var i = 0; i < DEST.length; i++) if (DEST[i][0].test(m[2])) return { appel: DEST[i][1], tu: DEST[i][2] };
+  var m = /\b(pour|a) (ma|mon|mes|notre|nos|ta|ton|un|une|le|la|l)\b ?(.*)$/.exec(n); if (!m) return null;
+  for (var i = 0; i < DEST.length; i++) if (DEST[i][0].test(m[3])) return { appel: DEST[i][1], tu: DEST[i][2] };
   return null;
 }
 /* Moteur XL : renvoie {m, chips} ou null (jamais de réponse automatique si détresse) */
@@ -321,9 +335,11 @@ function xlRepondre(texte, explicite) {
 
 /* ================= API publique ================= */
 W.ShamanMoteurJS = {
-  version: '1.29',
+  version: '1.35',
   /* conseil / cours, puis messages XL (même ordre que ShamanNative.moteurRepondre sur Android) */
   repondre: function (texte, explicite) { return moteurRepondre(texte, explicite) || xlRepondre(texte, explicite); },
+  /* messages XL seuls (couche « personne + situation » du bot) */
+  repondreXL: function (texte, explicite) { return xlRepondre(texte, explicite); },
   conseil: moteurRepondre, messages: xlRepondre,
   xlCatalogue: function () { return { categories: X.categories.map(function (c) { return c[0]; }), angles: X.angles.map(function (a) { return a.nom; }) }; },
   xlInfo: function () { return { competences: COMP.length, variantesSujets: CAPACITE_SUJETS, messagesPossibles: CAPACITE }; },

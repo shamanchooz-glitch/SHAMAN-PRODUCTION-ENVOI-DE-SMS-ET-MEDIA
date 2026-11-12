@@ -1986,7 +1986,8 @@ smsBody.addEventListener('input', () => {
    Dans l'APK, window.ShamanNative existe : les SMS partent directement,
    sans ouvrir l'appli SMS, avec choix automatique de la SIM. */
 const NATIVE = !!window.ShamanNative;
-const APP_VERSION = '1.34';
+/* Version affichée : celle de l'APK installé (versionName) ; hors APK (page web), version de ces fichiers. */
+const APP_VERSION = (function(){ try{ const v = window.ShamanNative && ShamanNative.appVersion && ShamanNative.appVersion(); if(v) return String(v); }catch(e){} return '1.35'; })();
 const nativeCbs = {};
 window.onShamanSms = function(json){
   try{ const e = JSON.parse(json); const cb = nativeCbs[e.id]; if(cb) cb(e); if(e.type === 'done') delete nativeCbs[e.id]; }catch(err){}
