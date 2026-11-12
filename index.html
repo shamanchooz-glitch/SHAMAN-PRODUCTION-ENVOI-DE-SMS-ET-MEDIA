@@ -1191,17 +1191,28 @@ function renderTrashList(){
 }
 // Numéro bloqué ? Comparaison sur la forme normalisée (+indicatif) pour que
 // "0748935686" et "+2250748935686" soient reconnus comme le même numéro.
-let _blkArr = null, _blkLen = -1, _blkEdge = '', _blkSet = new Set();
+let _blkArr = null, _blkLen = -1, _blkEdge = '', _blkSet = new Set(), _blkKeys = new Set();
+// Clé de comparaison : les 8 derniers chiffres (« +2250748935686 », « 0748935686 » et « 00225 07 48 93 56 86 »
+// donnent la même clé). En dessous de 8 chiffres, on compare le numéro tel quel.
+function phoneKey(n){
+  const d = String(n || '').replace(/\D/g, '');
+  return d.length >= 8 ? d.slice(-8) : d;
+}
 function blockedSetNow(){
   const a = db.blockedNumbers, n = a.length;
   const edge = n ? (a[0].number + '|' + a[n - 1].number + '|' + (a[n >> 1].number)) : '';
   if(a !== _blkArr || n !== _blkLen || edge !== _blkEdge){
-    _blkSet = new Set(a.map(b => b.number)); _blkArr = a; _blkLen = n; _blkEdge = edge;
+    _blkSet = new Set(a.map(b => b.number));
+    _blkKeys = new Set(a.map(b => phoneKey(b.number)).filter(Boolean));
+    _blkArr = a; _blkLen = n; _blkEdge = edge;
   }
   return _blkSet;
 }
 function isBlocked(normalizedNumber){
-  return blockedSetNow().has(normalizedNumber);
+  blockedSetNow();
+  if(_blkSet.has(normalizedNumber)) return true;
+  const k = phoneKey(normalizedNumber);
+  return !!k && _blkKeys.has(k);
 }
 // Retire d'une base tout numéro devenu bloqué entre-temps (ex. bloqué après
 // coup, ou arrivé via une synchro d'un autre téléphone). Ajuste le curseur
@@ -1975,7 +1986,7 @@ smsBody.addEventListener('input', () => {
    Dans l'APK, window.ShamanNative existe : les SMS partent directement,
    sans ouvrir l'appli SMS, avec choix automatique de la SIM. */
 const NATIVE = !!window.ShamanNative;
-const APP_VERSION = '1.33';
+const APP_VERSION = '1.34';
 const nativeCbs = {};
 window.onShamanSms = function(json){
   try{ const e = JSON.parse(json); const cb = nativeCbs[e.id]; if(cb) cb(e); if(e.type === 'done') delete nativeCbs[e.id]; }catch(err){}
@@ -2015,7 +2026,7 @@ function pushSkipToNative(force){
   const sig = blockedSetNow().size + '|' + unrSet().size + '|' + _blkEdge;
   if(!force && sig === _skipSig) return;
   _skipSig = sig;
-  try{ ShamanNative.setSkip(JSON.stringify([...blockedSetNow()].concat([...unrSet()]))); }catch(e){}
+  try{ ShamanNative.setSkip(JSON.stringify({ blocked: [...blockedSetNow()], aside: [...unrSet()] })); }catch(e){}
 }
 function nativeSend(numbers, body, onEvent, bodies, extra){
   pushSkipToNative(true);
@@ -4011,9 +4022,9 @@ function rbGenerate(){
   return ch;
 }
 function rbList(r){
-  const bl=blockedSetNow(), ids=r.groupIds||[];
+  const ids=r.groupIds||[];
   const l=r.source==='numbers'?r.numbers:db.contacts.filter(c=>c.phone&&(ids.includes('all')||ids.includes(c.group))).map(c=>c.phone);
-  return l.filter(n=>!bl.has(n.replace(/\s+/g,'')));
+  return l.filter(n=>!isBlocked(n.replace(/\s+/g,'')));
 }
 function rbBatch(r,j){
   if(r.source==='base'){
@@ -4147,6 +4158,7 @@ function rbDrain(it, manual){
   if(!nums.length){ rbEnd(d, { type: 'done', sent: 0, failed: 0, total: 0 }); return; }
   rbSetLive(`⏳ Robot : démarrage — ${nums.length} destinataires en ${lots.length} lot(s) · ${smsParts(msg).parts} SMS facturé(s) chacun…`);
   const stopAt = manual ? 0 : rbQuietStopAt();
+  pushSkipToNative(true);
   const res = ShamanNative.sendSms(JSON.stringify({ id: nid, numbers: nums, body: '', bodies, mode: simGet().mode, delay: simGet().delay, serial: !!simGet().serial, adaptive: simGet().auto !== false, inflight: 3, stopAt }));
   if(res !== 'ok'){ rbOnEvent(d)({ type: 'error', message: res }); return; }
   // Garde-fou : si le téléphone ne répond pas dans les 25 s, on le dit au lieu de rester bloqué sur « démarrage ».
