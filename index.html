@@ -1194,8 +1194,14 @@ function renderTrashList(){
 let _blkArr = null, _blkLen = -1, _blkEdge = '', _blkSet = new Set(), _blkKeys = new Set();
 // Clé de comparaison : les 8 derniers chiffres (« +2250748935686 », « 0748935686 » et « 00225 07 48 93 56 86 »
 // donnent la même clé). En dessous de 8 chiffres, on compare le numéro tel quel.
+// Chiffres arabes (٠١٢…) ou pleine largeur (０１２…) → chiffres ASCII, pour qu'un numéro écrit ainsi soit reconnu comme bloqué.
+function asciiDigits(s){
+  s = String(s || '');
+  try{ s = s.normalize('NFKC'); }catch(e){}
+  return s.replace(/[\u0660-\u0669\u06F0-\u06F9]/g, ch => { const c = ch.charCodeAt(0); return String(c >= 0x06F0 ? c - 0x06F0 : c - 0x0660); });
+}
 function phoneKey(n){
-  const d = String(n || '').replace(/\D/g, '');
+  const d = asciiDigits(n).replace(/\D/g, '');
   return d.length >= 8 ? d.slice(-8) : d;
 }
 function blockedSetNow(){
@@ -1987,7 +1993,7 @@ smsBody.addEventListener('input', () => {
    sans ouvrir l'appli SMS, avec choix automatique de la SIM. */
 const NATIVE = !!window.ShamanNative;
 /* Version affichée : celle de l'APK installé (versionName) ; hors APK (page web), version de ces fichiers. */
-const APP_VERSION = (function(){ try{ const v = window.ShamanNative && ShamanNative.appVersion && ShamanNative.appVersion(); if(v) return String(v); }catch(e){} return '1.36'; })();
+const APP_VERSION = (function(){ try{ const v = window.ShamanNative && ShamanNative.appVersion && ShamanNative.appVersion(); if(v) return String(v); }catch(e){} return '1.37'; })();
 const nativeCbs = {};
 window.onShamanSms = function(json){
   try{ const e = JSON.parse(json); const cb = nativeCbs[e.id]; if(cb) cb(e); if(e.type === 'done') delete nativeCbs[e.id]; }catch(err){}
@@ -3049,6 +3055,9 @@ document.getElementById('buildSmsBatches').addEventListener('click', () => {
     recipients = getSelected('smsRecipientPicker');
     if(!recipients.length){ alert('Sélectionnez au moins un destinataire.'); return; }
   }
+  // Dernier filtre : un contact dont le numéro est bloqué (ou absent) ne reçoit rien, quelle que soit la source.
+  recipients = recipients.filter(c => c && c.phone && !isBlocked(c.phone));
+  if(!recipients.length){ alert('Tous les destinataires sélectionnés sont bloqués ou sans numéro : aucun lot créé.'); return; }
 
   const batches = [];
   for(let i = 0; i < recipients.length; i += batchSize){
@@ -3466,10 +3475,11 @@ function openScheduledBatches(id){
     }, 'email');
 
   } else if(s.type === 'whatsapp'){
-    const recipients = s.source === 'numbers'
+    let recipients = s.source === 'numbers'
       ? s.phones.map(p => ({ name: p, phone: p }))
       : db.contacts.filter(c => s.recipientIds.includes(c.id) && c.phone);
-    if(!recipients.length){ alert('Aucun destinataire valide (numéro manquant ?).'); return; }
+    recipients = recipients.filter(c => !isBlocked(c.phone));
+    if(!recipients.length){ alert('Aucun destinataire valide (numéro manquant ou bloqué ?).'); return; }
     // WhatsApp has no multi-recipient prefill — one link per contact, opened
     // and sent individually, same principle as everywhere else in the app.
     const container = document.getElementById('sched-batches-' + id);
@@ -3484,8 +3494,8 @@ function openScheduledBatches(id){
     `).join('');
 
   } else {
-    const phones = s.source === 'numbers' ? s.phones : db.contacts.filter(c => s.recipientIds.includes(c.id) && c.phone).map(c => c.phone);
-    if(!phones.length){ alert('Aucun destinataire valide (numéro manquant ?).'); return; }
+    const phones = (s.source === 'numbers' ? s.phones : db.contacts.filter(c => s.recipientIds.includes(c.id) && c.phone).map(c => c.phone)).filter(p => p && !isBlocked(p));
+    if(!phones.length){ alert('Aucun destinataire valide (numéro manquant ou bloqué ?).'); return; }
     const batches = [];
     for(let i = 0; i < phones.length; i += s.batchSize) batches.push(phones.slice(i, i + s.batchSize));
     renderBatches('sched-batches-' + id, batches, (batch, sep) => {
@@ -3528,7 +3538,7 @@ function renderSchedBaseBatch(s){
   }
 
   const { start, size } = s.pendingBatch;
-  const batch = base.numbers.slice(start, start + size);
+  const batch = base.numbers.slice(start, start + size).filter(n => !isBlocked(n));
   if(!batch.length){
     // La base a changé sous nos pieds (numéros supprimés) : on abandonne ce
     // lot proprement plutôt que d'afficher du vide.
@@ -4381,7 +4391,7 @@ document.getElementById('blockedFilterInput').addEventListener('input', (e) => r
 function normalizePhone(raw, defaultDial){
   let s = (raw || '').trim();
   if(!s) return '';
-  s = s.replace(/[^\d+]/g, ''); // strip spaces, dashes, dots, parentheses…
+  s = asciiDigits(s).replace(/[^\d+]/g, ''); // strip spaces, dashes, dots, parentheses…
   if(!s) return '';
   if(s.startsWith('00')) s = '+' + s.slice(2);
   if(s.startsWith('+')) return s;
@@ -4814,7 +4824,7 @@ function renderCurrentBaseBatch(){
 
   const { start, size, body } = base.pendingBatch;
   const senderLabel = simLabelAt(base.pendingBatch.simIdx || 0);
-  const batch = base.numbers.slice(start, start + size);
+  const batch = base.numbers.slice(start, start + size).filter(n => !isBlocked(n));
   if(!batch.length){
     // La base a changé sous nos pieds (numéros supprimés) : le lot préparé
     // n'a plus de sens, on l'abandonne proprement plutôt que d'afficher du vide.
