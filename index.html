@@ -1194,11 +1194,19 @@ function renderTrashList(){
 let _blkArr = null, _blkLen = -1, _blkEdge = '', _blkSet = new Set(), _blkKeys = new Set();
 // Clé de comparaison : les 8 derniers chiffres (« +2250748935686 », « 0748935686 » et « 00225 07 48 93 56 86 »
 // donnent la même clé). En dessous de 8 chiffres, on compare le numéro tel quel.
-// Chiffres arabes (٠١٢…) ou pleine largeur (０１２…) → chiffres ASCII, pour qu'un numéro écrit ainsi soit reconnu comme bloqué.
+// Tout chiffre (arabe ٠١٢…, persan ۰۱۲…, hindi, pleine largeur ０１２…) devient un chiffre 0123… : sinon un numéro écrit
+// ainsi ne serait jamais reconnu comme bloqué. Les caractères invisibles et les espaces insécables sont ignorés plus loin (\D).
+var _ZEROS = [0x660, 0x6F0, 0x7C0, 0x966, 0x9E6, 0xA66, 0xAE6, 0xB66, 0xBE6, 0xC66, 0xCE6, 0xD66, 0xDE6, 0xE50, 0xED0, 0xF20, 0x1040, 0x1090, 0x17E0, 0x1810, 0x1946, 0x19D0, 0x1A80, 0x1A90, 0x1B50, 0x1BB0, 0x1C40, 0x1C50, 0xA620, 0xA8D0, 0xA900, 0xA9D0, 0xA9F0, 0xAA50, 0xABF0, 0xFF10];
 function asciiDigits(s){
-  s = String(s || '');
-  try{ s = s.normalize('NFKC'); }catch(e){}
-  return s.replace(/[\u0660-\u0669\u06F0-\u06F9]/g, ch => { const c = ch.charCodeAt(0); return String(c >= 0x06F0 ? c - 0x06F0 : c - 0x0660); });
+  s = String(s == null ? '' : s);
+  if(!/[^\x00-\x7f]/.test(s)) return s;
+  let o = '';
+  for(const ch of s){
+    const c = ch.codePointAt(0); let r = ch;
+    if(c > 127){ for(let i = 0; i < _ZEROS.length; i++){ const z = _ZEROS[i]; if(c >= z && c < z + 10){ r = String(c - z); break; } } }
+    o += r;
+  }
+  return o;
 }
 function phoneKey(n){
   const d = asciiDigits(n).replace(/\D/g, '');
@@ -1993,7 +2001,7 @@ smsBody.addEventListener('input', () => {
    sans ouvrir l'appli SMS, avec choix automatique de la SIM. */
 const NATIVE = !!window.ShamanNative;
 /* Version affichée : celle de l'APK installé (versionName) ; hors APK (page web), version de ces fichiers. */
-const APP_VERSION = (function(){ try{ const v = window.ShamanNative && ShamanNative.appVersion && ShamanNative.appVersion(); if(v) return String(v); }catch(e){} return '1.37'; })();
+const APP_VERSION = (function(){ try{ const v = window.ShamanNative && ShamanNative.appVersion && ShamanNative.appVersion(); if(v) return String(v); }catch(e){} return '1.38'; })();
 const nativeCbs = {};
 window.onShamanSms = function(json){
   try{ const e = JSON.parse(json); const cb = nativeCbs[e.id]; if(cb) cb(e); if(e.type === 'done') delete nativeCbs[e.id]; }catch(err){}
@@ -2303,7 +2311,7 @@ const QRGen = (function(){
 
 /* ================= IMPORTS DE NUMÉROS (avec accord des personnes) ================= */
 function normCI(raw){
-  const s0 = String(raw == null ? '' : raw).trim();
+  const s0 = asciiDigits(raw).trim();
   let d = s0.replace(/\D/g, '');
   if(!d) return null;
   const intl = s0.startsWith('+') || s0.startsWith('00');
@@ -2319,7 +2327,7 @@ function normCI(raw){
 function extractNumbers(text){
   const out = [];
   String(text || '').split(/[\n\r,;|\t]+/).forEach(chunk => {
-    const c = chunk.trim(); if(!c) return;
+    const c = asciiDigits(chunk).trim(); if(!c) return;
     const digits = c.replace(/\D/g, '');
     if(digits.length < 7) return;
     if(digits.length <= 15){ out.push(c); return; }
@@ -2855,7 +2863,7 @@ function smsCounterFor(ta){
 function initSmsCounters(){ ['smsBody', 'schedBody', 'rbBody', 'baseSmsBody'].forEach(id => { const ta = document.getElementById(id); if(ta && !ta.dataset.counter){ ta.dataset.counter = '1'; smsCounterFor(ta); } }); }
 if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initSmsCounters); else initSmsCounters();
 function cleanNum(n){
- return String(n).replace(/\s+/g, ''); }
+ return asciiDigits(n).replace(/[\s\u200b-\u200f\u202a-\u202e\u2060\ufeff]+/g, ''); }
 // Branche un bouton « envoi automatique » : progression + fin.
 function nativeRun(btn, statusEl, numbers, body, onDone){
   btn.disabled = true;
@@ -3053,7 +3061,12 @@ document.getElementById('buildSmsBatches').addEventListener('click', () => {
     baseCtx = { id: b.id, rest };
   } else {
     recipients = getSelected('smsRecipientPicker');
-    if(!recipients.length){ alert('Sélectionnez au moins un destinataire.'); return; }
+    const nBlk = recipients.filter(c => c.phone && isBlocked(c.phone)).length;
+    if(nBlk){
+      recipients = recipients.filter(c => !(c.phone && isBlocked(c.phone)));
+      alert(`🚫 ${nBlk} contact${nBlk > 1 ? 's' : ''} bloqué${nBlk > 1 ? 's' : ''} retiré${nBlk > 1 ? 's' : ''} de cet envoi.`);
+    }
+    if(!recipients.length){ alert('Sélectionnez au moins un destinataire (non bloqué).'); return; }
   }
   // Dernier filtre : un contact dont le numéro est bloqué (ou absent) ne reçoit rien, quelle que soit la source.
   recipients = recipients.filter(c => c && c.phone && !isBlocked(c.phone));
@@ -3475,10 +3488,11 @@ function openScheduledBatches(id){
     }, 'email');
 
   } else if(s.type === 'whatsapp'){
-    let recipients = s.source === 'numbers'
+    const recipients0 = s.source === 'numbers'
       ? s.phones.map(p => ({ name: p, phone: p }))
       : db.contacts.filter(c => s.recipientIds.includes(c.id) && c.phone);
-    recipients = recipients.filter(c => !isBlocked(c.phone));
+    const recipients = recipients0.filter(c => !isBlocked(c.phone));
+    if(recipients0.length > recipients.length) alert(`🚫 ${recipients0.length - recipients.length} numéro(s) bloqué(s) retiré(s) de cet envoi.`);
     if(!recipients.length){ alert('Aucun destinataire valide (numéro manquant ou bloqué ?).'); return; }
     // WhatsApp has no multi-recipient prefill — one link per contact, opened
     // and sent individually, same principle as everywhere else in the app.
@@ -3494,7 +3508,9 @@ function openScheduledBatches(id){
     `).join('');
 
   } else {
-    const phones = (s.source === 'numbers' ? s.phones : db.contacts.filter(c => s.recipientIds.includes(c.id) && c.phone).map(c => c.phone)).filter(p => p && !isBlocked(p));
+    const phones0 = s.source === 'numbers' ? s.phones : db.contacts.filter(c => s.recipientIds.includes(c.id) && c.phone).map(c => c.phone);
+    const phones = phones0.filter(p => !isBlocked(p));
+    if(phones0.length > phones.length) alert(`🚫 ${phones0.length - phones.length} numéro(s) bloqué(s) retiré(s) de cet envoi.`);
     if(!phones.length){ alert('Aucun destinataire valide (numéro manquant ou bloqué ?).'); return; }
     const batches = [];
     for(let i = 0; i < phones.length; i += s.batchSize) batches.push(phones.slice(i, i + s.batchSize));
@@ -4389,12 +4405,14 @@ document.getElementById('addBlockedBtn').addEventListener('click', () => {
 document.getElementById('blockedFilterInput').addEventListener('input', (e) => renderBlockedList(e.target.value));
 
 function normalizePhone(raw, defaultDial){
-  let s = (raw || '').trim();
+  let s = asciiDigits(raw || '').trim();
   if(!s) return '';
-  s = asciiDigits(s).replace(/[^\d+]/g, ''); // strip spaces, dashes, dots, parentheses…
+  s = s.replace(/[^\d+]/g, ''); // strip spaces, dashes, dots, parentheses, espaces insécables…
   if(!s) return '';
   if(s.startsWith('00')) s = '+' + s.slice(2);
   if(s.startsWith('+')) return s;
+  // « 225 07 48 93 56 86 » (indicatif sans le +) : 13 chiffres commençant par 225 = numéro ivoirien complet
+  if(defaultDial === '225' && /^225\d{10}$/.test(s)) return '+' + s;
   if(defaultDial === '225'){
     // Côte d'Ivoire (réforme 2021) : le numéro fait 10 chiffres et le 0 en
     // fait partie — on le garde (ou on le rajoute s'il manque), on ne le

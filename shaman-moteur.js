@@ -296,6 +296,37 @@ function premier(liste, n) { for (var i = 0; i < liste.length; i++) if (liste[i]
 /* Destinataires : « message pour ma maman » → « Chère maman, » et tutoiement ; les catégories de personnes ne sont pas des sujets */
 var DEST = [
   [/\b(belle mere|belle maman)\b/, 'Chère belle-maman', false], [/\b(beau pere)\b/, 'Cher beau-père', false],
+  [/\b(beau frere)\b/, 'Cher beau-frère', true],
+  [/\b(belle soeur)\b/, 'Chère belle-sœur', true],
+  [/\b(gendre)\b/, 'Cher gendre', true],
+  [/\b(belle fille|bru)\b/, 'Chère belle-fille', true],
+  [/\b(beau fils)\b/, 'Cher beau-fils', true],
+  [/\b(petit fils)\b/, 'Mon cher petit-fils', true],
+  [/\b(petits enfants)\b/, 'Mes chers petits-enfants', false],
+  [/\b(filleule)\b/, 'Ma chère filleule', true],
+  [/\b(filleul)\b/, 'Mon cher filleul', true],
+  [/\b(marraine)\b/, 'Chère marraine', true],
+  [/\b(parrain)\b/, 'Cher parrain', true],
+  [/\b(fiance|fiancee|compagnon|compagne|conjoint|conjointe|petit ami|petite amie)\b/, 'Mon amour', true],
+  [/\b(freres et soeurs|freres soeurs|petits freres|petites soeurs|grands freres|grandes soeurs)\b/, 'Chers frères et sœurs', false],
+  [/\b(freres)\b/, 'Chers frères', false],
+  [/\b(soeurs)\b/, 'Chères sœurs', false],
+  [/\b(cousins|cousines)\b/, 'Chers cousins', false],
+  [/\b(neveux|nieces)\b/, 'Chers neveux et nièces', false],
+  [/\b(amis|amies|copains|copines|potes)\b/, 'Chers amis', false],
+  [/\b(voisins|voisines)\b/, 'Chers voisins', false],
+  [/\b(collegues)\b/, 'Chers collègues', false],
+  [/\b(proches)\b/, 'Chers proches', false],
+  [/\b(famille)\b/, 'Chère famille', false],
+  [/\b(clients)\b/, 'Chers clients', false],
+  [/\b(employes|employees|ouvriers|salaries|collaborateurs|collaboratrices)\b/, 'Bonjour à tous', false],
+  [/\b(eleves|etudiants)\b/, 'Chers élèves', false],
+  [/\b(professeur|prof|maitre|maitresse|instituteur|institutrice|enseignant|enseignante)\b/, 'Cher professeur', false],
+  [/\b(medecin|docteur|infirmier|infirmiere|dentiste|pharmacien|pharmacienne)\b/, 'Bonjour', false],
+  [/\b(pasteur)\b/, 'Cher pasteur', false],
+  [/\b(imam|cheikh)\b/, 'Cher imam', false],
+  [/\b(pretre|cure|abbe)\b/, 'Cher père', false],
+  [/\b(proprietaire|bailleur|logeur|locataire|responsable|superviseur|manager|superieur|equipe|associe|associee|stagiaire|apprenti|apprentie|secretaire|assistante|gardienne|gouvernante|intendante|aide menagere|aide a domicile|domestique|intendant)\b/, 'Bonjour', false],
   [/\b(grand mere|grand maman)\b/, 'Chère grand-mère', true], [/\b(grand pere)\b/, 'Cher grand-père', true], [/\b(grands parents)\b/, 'Chers grands-parents', false],
   [/\b(mamie|mamy)\b/, 'Chère mamie', true], [/\b(papi|papy)\b/, 'Cher papi', true],
   [/\b(maman|mere|mama)\b/, 'Chère maman', true], [/\b(papa|pere)\b/, 'Cher papa', true], [/\b(parents)\b/, 'Chers parents', false],
@@ -306,7 +337,8 @@ var DEST = [
   [/\b(enfants)\b/, 'Mes chers enfants', false], [/\b(fils|fille|enfant)\b/, 'Mon enfant', true], [/\b(collegue)\b/, 'Cher collègue', false], [/\b(client|cliente)\b/, 'Cher client', false],
   [/\b(candidat|candidate)\b/, 'Cher candidat', false], [/\b(patron|patronne|directeur|directrice|chef)\b/, 'Bonjour', false],
   [/\b(employe|employee|bonne|nounou|gardien|vigile|chauffeur|menagere|cuisinier|cuisiniere|jardinier)\b/, 'Bonjour', false],
-  [/\b(voisin|voisine)\b/, 'Cher voisin', false]
+  [/\b(voisine)\b/, 'Chère voisine', false],
+  [/\b(voisin)\b/, 'Cher voisin', false]
 ];
 var CAT_PERSONNES = { 'Famille': 1, 'Parents': 1, 'Enfants': 1, 'Amis': 1, 'Voisins et visiteurs': 1 };
 function destinataire(n) {
@@ -335,7 +367,7 @@ function xlRepondre(texte, explicite) {
 
 /* ================= API publique ================= */
 W.ShamanMoteurJS = {
-  version: '1.37',
+  version: '1.38',
   /* conseil / cours, puis messages XL (même ordre que ShamanNative.moteurRepondre sur Android) */
   repondre: function (texte, explicite) { return moteurRepondre(texte, explicite) || xlRepondre(texte, explicite); },
   /* messages XL seuls (couche « personne + situation » du bot) */

@@ -63,8 +63,11 @@ sur Envoyer.
 1. Créez un dépôt GitHub public (ex. `shaman-production-app`).
 2. Déposez les fichiers de ce dossier à la racine : `index.html`, `manifest.json`,
    `icon.png`, `icon-maskable.png`, `avatar.png`, `sw.js`, ainsi que l'assistant :
-   `shaman-skills.js`, `shaman-moteur.js` (moteurs de conseil, de cours et de messages)
-   et `shaman-bot.js`. Ce sont les mêmes fichiers que dans l'application Android.
+   `shaman-skills.js`, `shaman-moteur.js` (moteurs de conseil, de cours et de messages),
+   `shaman-cours.js` (cours détaillés, chargés par `shaman-moteur.js`), `shaman-bot.js`
+   et `shaman-knowledge.json` (mêmes données que celles intégrées dans `shaman-bot.js`, ligne 9).
+   Ce sont les mêmes fichiers que dans l'application Android : `index.html`, `shaman-bot.js`,
+   `shaman-moteur.js` et `shaman-knowledge.json` doivent être identiques dans les deux dépôts.
 3. **Settings → Pages** → source = branche `main`, dossier `/ (root)`.
 4. Votre lien sera du type :
    `https://<votre-nom-utilisateur>.github.io/shaman-production-app/`
@@ -75,3 +78,8 @@ Si vous préférez ne pas utiliser GitHub, ces fichiers peuvent aussi être
 déposés sur n'importe quel hébergeur de site statique gratuit (Netlify,
 Vercel, etc.) — dites-le-moi si vous voulez la marche à suivre pour l'un
 d'eux.
+
+## Mise à jour de l'assistant (version 1.38)
+- Mêmes fichiers que l'application Android 1.38 : `index.html`, `shaman-bot.js`, `shaman-moteur.js`, `shaman-knowledge.json`.
+- `sw.js` : cache `shaman-production-v59` (les fichiers `.js` sont servis depuis le cache : changer ce numéro à chaque mise à jour des fichiers pour que les téléphones prennent la nouvelle version) ; `shaman-cours.js` est maintenant préchargé.
+- Numéros bloqués : reconnus quel que soit leur format (+225…, 0…, 00225…, espaces, points, tirets, parenthèses, chiffres arabes ou pleine largeur), sur les 8 derniers chiffres ; tous les lots d'envoi (contacts, numéros collés, SMS et WhatsApp programmés, base de numéros) retirent les numéros bloqués.
