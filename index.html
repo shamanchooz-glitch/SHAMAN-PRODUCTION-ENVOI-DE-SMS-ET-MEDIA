@@ -158,6 +158,28 @@
   .card.cc.collapsed > h2::after{transform:rotate(-90deg);}
   .card.cc.collapsed > :not(h2){display:none !important;}
 
+  /* ---- Contrôle du robot ---- */
+  .rb-switch-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 10px;padding:6px 0;cursor:pointer;}
+  .rb-switch-row .rb-switch-txt{display:flex;flex-direction:column;gap:2px;color:var(--text);font-size:15px;}
+  .rb-switch-row small{font-size:12px;color:var(--text-dim);font-weight:500;}
+  .rb-switch{position:relative;flex:0 0 auto;width:58px;height:32px;}
+  .rb-switch input{position:absolute;inset:0;width:100%;height:100%;opacity:0;margin:0;cursor:pointer;z-index:2;}
+  .rb-switch i{position:absolute;inset:0;border-radius:999px;background:#B7C9D6;transition:background .15s ease;}
+  .rb-switch i::after{content:'';position:absolute;top:3px;left:3px;width:26px;height:26px;border-radius:50%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.25);transition:transform .15s ease;}
+  .rb-switch input:checked + i{background:linear-gradient(135deg,var(--signal),var(--sky));}
+  .rb-switch input:checked + i::after{transform:translateX(26px);}
+  .rb-st{border-radius:12px;padding:11px 13px;border:1px solid var(--line);background:var(--sky-dim);margin-bottom:10px;}
+  .rb-st b{font-size:14.5px;}
+  .rb-st .dim2{font-size:12.5px;color:var(--text-dim);margin-top:3px;line-height:1.45;}
+  .rb-st.on{border-color:#9ADBC0;background:#E4F7EE;}
+  .rb-st.warn{border-color:#F6C49A;background:#FFF1E3;}
+  .rb-st.off{border-color:#E9A5B0;background:#FDE9ED;}
+  .rb-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0 6px;}
+  .rb-stat{background:var(--sky-dim);border:1px solid var(--line);border-radius:10px;padding:8px 6px;text-align:center;}
+  .rb-stat b{display:block;font-size:17px;color:var(--text);}
+  .rb-stat span{font-size:11px;color:var(--text-dim);}
+  .rb-sub{font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-dim);font-weight:700;margin:18px 0 4px;}
+
   .subtabs{display:flex;gap:6px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:5px;margin-bottom:14px;overflow-x:auto;column-span:all;}
   .subtabs button{flex:1;white-space:nowrap;background:transparent;border:none;color:var(--text-dim);font-weight:600;font-size:12.5px;padding:9px 10px;border-radius:9px;cursor:pointer;font-family:inherit;}
   .subtabs button.active{background:var(--sky-dim);color:var(--sky);box-shadow:inset 0 0 0 1px var(--line);}
@@ -719,6 +741,36 @@
 
   <!-- ===================== NUMÉROS BLOQUÉS ===================== -->
   <div class="tabpanel" id="tab-robot">
+    <div class="card" id="rbCtlCard">
+      <h2>🎛️ Contrôle du robot</h2>
+      <label class="rb-switch-row" for="rbCtlOn">
+        <span class="rb-switch-txt"><b>Robot sur ce téléphone</b><small>Interrupteur général des envois automatiques</small></span>
+        <span class="rb-switch"><input type="checkbox" id="rbCtlOn"><i></i></span>
+      </label>
+      <div id="rbCtlState"></div>
+      <div class="row" id="rbCtlPauseRow" style="gap:6px;flex-wrap:nowrap;">
+        <button type="button" class="btn btn-secondary btn-small" data-rb-pause="60" style="flex:1 1 0;white-space:nowrap;padding:10px 6px;">⏸ 1 h</button>
+        <button type="button" class="btn btn-secondary btn-small" data-rb-pause="180" style="flex:1 1 0;white-space:nowrap;padding:10px 6px;">⏸ 3 h</button>
+        <button type="button" class="btn btn-secondary btn-small" data-rb-pause="morning" style="flex:2 1 0;white-space:nowrap;padding:10px 6px;">⏸ Jusqu'au matin</button>
+        <button type="button" class="btn btn-primary btn-small" id="rbCtlResume" style="display:none;">▶ Reprendre maintenant</button>
+      </div>
+      <button type="button" class="btn btn-danger btn-small" id="rbCtlStop" style="display:none;width:100%;margin-top:8px;">⛔ Arrêt d'urgence (stoppe l'envoi en cours)</button>
+      <div class="rb-stats" id="rbCtlStats"></div>
+      <div class="base-progress" id="rbCtlBar" style="display:none;"><div class="base-progress-fill" id="rbCtlBarFill" style="width:0%"></div></div>
+
+      <div class="rb-sub">Sécurités</div>
+      <label>Arrêt automatique après N échecs d'envoi de suite (0 = jamais) — protège votre crédit et votre SIM</label>
+      <input id="rbCtlErr" type="number" min="0" max="20">
+      <label>Suspendre les envois si la batterie passe sous N % (hors charge, 0 = jamais)</label>
+      <input id="rbCtlBatt" type="number" min="0" max="90">
+      <div class="counter" id="rbCtlBattNote" style="text-align:left;"></div>
+      <label class="check-row" style="margin-top:8px;"><input type="checkbox" id="rbCtlSkip"> Ne pas rattraper les créneaux manqués quand le robot était arrêté ou en pause</label>
+
+      <div class="rb-sub">Vérification rapide</div>
+      <div id="rbCtlCheck" class="dim" style="font-size:12.5px;line-height:1.7;margin:0;"></div>
+      <button type="button" class="btn btn-secondary btn-small" id="rbCtlBattBtn" style="display:none;margin-top:8px;">⚙️ Autoriser sans restriction de batterie</button>
+      <p class="dim" style="font-size:12px;margin:12px 0 0;">Cet interrupteur ne concerne que <b>ce téléphone</b> : un autre téléphone synchronisé continue de son côté. Les envois manuels (« ⚡ Envoyer tous les lots ») restent toujours possibles. Une pause n'interrompt pas l'envoi déjà en cours — utilisez l'arrêt d'urgence pour cela.</p>
+    </div>
     <div class="card">
       <h2>🤖 À envoyer maintenant (<span id="robotDueCount">0</span>)</h2>
       <p class="dim" style="font-size:12px;margin:0 0 8px;">Le robot ouvre l'appli SMS avec le lot prêt (app ouverte) : vous n'avez qu'à envoyer, puis revenir. Au retour, le lot est marqué envoyé et le suivant s'ouvre.</p>
@@ -4019,6 +4071,134 @@ if(JSON.stringify(db.robotSettings.times) === JSON.stringify(['09:00','13:00','1
 if(!db.robotSettings.maxPerDay) db.robotSettings.maxPerDay = db.robotSettings.maxPerDay||0;
 if(db.robotSettings.jitterMin===undefined) db.robotSettings.jitterMin=0;
 let rbAwait=null, rbAwaitAt=0, rbHid=false;
+/* ================= CONTRÔLE DU ROBOT =================
+   Interrupteur général + pause minutée + sécurités. Ces réglages sont propres à CE téléphone
+   (gardés ici, pas dans la base synchronisée) : arrêter le robot ici n'arrête pas un autre téléphone. */
+const RB_CTL_KEY='shaman_rb_ctl';
+function rbCtl(){
+  let c={}; try{ c=JSON.parse(localStorage.getItem(RB_CTL_KEY)||'{}')||{}; }catch(e){}
+  if(c.enabled===undefined) c.enabled=true;          // comme avant : en marche tant qu'on ne l'arrête pas
+  if(c.autoStopErr===undefined) c.autoStopErr=3;
+  if(c.minBatt===undefined) c.minBatt=15;
+  if(c.skipMissed===undefined) c.skipMissed=true;
+  c.pausedUntil=c.pausedUntil||0; c.skipBefore=c.skipBefore||0; c.errStreak=c.errStreak||0; c.stopReason=c.stopReason||'';
+  return c;
+}
+function rbCtlSet(p){ const c=Object.assign(rbCtl(),p); try{ localStorage.setItem(RB_CTL_KEY,JSON.stringify(c)); }catch(e){} return c; }
+function rbRunning(){ const c=rbCtl(); return !!c.enabled && !(c.pausedUntil>Date.now()); }
+// Réactivation / fin de pause : on repart de maintenant (les créneaux manqués ne sont pas rattrapés si l'option est cochée).
+function rbResume(){ const c=rbCtl(); return rbCtlSet({enabled:true,pausedUntil:0,errStreak:0,stopReason:'',skipBefore:c.skipMissed?Date.now():c.skipBefore}); }
+let rbBatt=null;
+try{ if(navigator.getBattery) navigator.getBattery().then(b=>{ const up=()=>{ rbBatt={level:b.level,charging:b.charging}; }; up(); b.addEventListener('levelchange',up); b.addEventListener('chargingchange',up); }).catch(()=>{}); }catch(e){}
+function rbBattOk(){ const c=rbCtl(); return !(c.minBatt>0&&rbBatt&&!rbBatt.charging&&rbBatt.level*100<c.minBatt); }
+function rbSentSince(ms){ const t0=Date.now()-ms; let n=0; db.robotJobs.forEach(j=>(j.log||[]).forEach(l=>{ if(l.t>=t0) n+=l.n; })); return n; }
+function rbNextSlot(){
+  const now=Date.now(); let best=null;
+  db.robotRules.filter(r=>r.active).forEach(r=>{
+    const sc=rbSched(r);
+    for(let k=0;k<8;k++){
+      const d=new Date(); d.setDate(d.getDate()+k); if(!sc.days.includes(d.getDay())) continue;
+      sc.times.forEach(t=>{ const [h,m]=t.split(':').map(Number), at=new Date(d.getFullYear(),d.getMonth(),d.getDate(),h,m).getTime(); if(at>now&&(!best||at<best.at)) best={at,r}; });
+    }
+  });
+  return best;
+}
+// Appelée à la fin de chaque envoi du robot : arrêt automatique après des échecs répétés.
+function rbCtlNote(ev){
+  const C=rbCtl();
+  const bad=ev.type==='error'||(ev.type==='done'&&!ev.cancelled&&!ev.paused&&!ev.aborted&&!(ev.sent>0)&&ev.failed>0);
+  const good=ev.type==='done'&&ev.sent>0, p={};
+  if(bad) p.errStreak=(C.errStreak||0)+1; else if(good) p.errStreak=0;
+  if(bad&&C.autoStopErr>0&&C.enabled&&p.errStreak>=C.autoStopErr){
+    p.enabled=false;
+    p.stopReason='⚠️ Arrêt automatique : '+p.errStreak+' échecs d\'envoi de suite'+(ev.message?' ('+ev.message+')':'')+'. Vérifiez le crédit, la SIM et le journal, puis réactivez.';
+    try{ if('Notification' in window&&Notification.permission==='granted') new Notification('🤖 SHAMAN PRODUCTION',{body:'Robot arrêté automatiquement après '+p.errStreak+' échecs.'}); }catch(e){}
+  }
+  if(Object.keys(p).length) rbCtlSet(p);
+}
+function rbCtlState(C,pending){
+  const S=db.robotSettings, now=Date.now();
+  const hm=t=>new Date(t).toLocaleString('fr-FR',{weekday:'short',hour:'2-digit',minute:'2-digit'});
+  if(!C.enabled) return {cls:'off',title:'⛔ Robot désactivé',detail:C.stopReason?escapeHtml(C.stopReason):'Aucun envoi automatique sur ce téléphone. Les envois manuels (⚡) restent possibles.'};
+  if(C.pausedUntil>now) return {cls:'warn',title:'⏸ Robot en pause',detail:'Reprise automatique : '+hm(C.pausedUntil)};
+  if(rbAwait) return {cls:'on',title:'⚡ Envoi en cours',detail:'Le robot envoie les lots, vous pouvez quitter cet écran.'};
+  if(rbQuotaLeft()<=0) return {cls:'warn',title:'⏸ Quota du jour atteint',detail:'Reprise demain (quota : '+S.maxPerDay+' SMS par jour).'};
+  if(rbQuiet()) return {cls:'warn',title:'🌙 Heures calmes',detail:'Pas d\'envoi automatique jusqu\'à '+escapeHtml(S.quietTo)+'.'};
+  if(!rbBattOk()) return {cls:'warn',title:'🔋 Batterie faible',detail:'Envois suspendus sous '+C.minBatt+' % (reprise en charge ou au-dessus du seuil).'};
+  const nx=rbNextSlot();
+  return {cls:'on',title:'🟢 Robot en marche',detail:(pending?pending+' envoi(s) prêt(s) · ':'')+(nx?'prochain créneau : '+hm(nx.at)+' · '+escapeHtml(nx.r.name):'aucune règle active : ajoutez-en une plus bas.')};
+}
+function rbCtlRender(items){
+  const box=$r('rbCtlCard'); if(!box) return;
+  const C=rbCtl(), S=db.robotSettings, now=Date.now();
+  const pending=(items||[]).filter(x=>x.c).length, st=rbCtlState(C,pending), paused=C.enabled&&C.pausedUntil>now;
+  $r('rbCtlOn').checked=!!C.enabled;
+  setHtml($r('rbCtlState'),`<div class="rb-st ${st.cls}"><b>${st.title}</b><div class="dim2">${st.detail}</div></div>`);
+  $r('rbCtlPauseRow').style.display=C.enabled?'':'none';
+  box.querySelectorAll('[data-rb-pause]').forEach(b=>b.style.display=paused?'none':'');
+  $r('rbCtlResume').style.display=paused?'':'none';
+  $r('rbCtlStop').style.display=(NATIVE&&rbAwait)?'':'none';
+  const today=rbSentToday(), q=S.maxPerDay;
+  setHtml($r('rbCtlStats'),`<div class="rb-stat"><b>${today}${q>0?' / '+q:''}</b><span>SMS aujourd'hui</span></div><div class="rb-stat"><b>${rbSentSince(7*864e5)}</b><span>SMS · 7 jours</span></div><div class="rb-stat"><b>${pending}</b><span>envois prêts</span></div>`);
+  $r('rbCtlBar').style.display=q>0?'':'none';
+  if(q>0) $r('rbCtlBarFill').style.width=Math.min(100,Math.round(today*100/q))+'%';
+  const chk=[]; let ex=true;
+  if(NATIVE){
+    let ns=null; try{ ns=JSON.parse(ShamanNative.status()); }catch(e){}
+    try{ ex=ShamanNative.isBatteryExempt(); }catch(e){}
+    chk.push(ex?'✅ Batterie : sans restriction':'⚠️ Batterie limitée : Android peut couper le robot en arrière-plan');
+    if(ns) chk.push(ns.keep?'✅ Mode arrière-plan actif':'⚠️ Mode arrière-plan inactif (cochez « Garder l\'app active en arrière-plan » dans les cartes SIM)');
+  }
+  if(rbBatt) chk.push('🔋 Batterie du téléphone : '+Math.round(rbBatt.level*100)+' %'+(rbBatt.charging?' (en charge)':''));
+  const act=db.robotRules.filter(r=>r.active).length;
+  chk.push(act?`✅ Règles actives : ${act} / ${db.robotRules.length}`:'⚠️ Aucune règle active : le robot n\'a rien à envoyer');
+  setHtml($r('rbCtlCheck'),chk.join('<br>'));
+  $r('rbCtlBattBtn').style.display=(NATIVE&&!ex)?'':'none';
+  $r('rbCtlBattNote').textContent=rbBatt?'':'Niveau de batterie non lisible sur ce téléphone : ce garde-fou est inactif.';
+  const ae=document.activeElement;
+  if(!(ae&&box.contains(ae))){ $r('rbCtlErr').value=C.autoStopErr; $r('rbCtlBatt').value=C.minBatt; $r('rbCtlSkip').checked=!!C.skipMissed; }
+}
+(function(){
+  const box=$r('rbCtlCard'); if(!box) return;
+  $r('rbCtlOn').addEventListener('change',e=>{
+    if(e.target.checked){
+      const n=rbItems().filter(x=>x.c).length;
+      if(n&&!confirm('Activer le robot ?\n\n'+n+' envoi(s) en attente seront envoyés automatiquement dès que possible (heures calmes et quota respectés). Les SMS sont facturés par votre opérateur.')){ e.target.checked=false; return; }
+      rbResume(); toast('🟢 Robot activé sur ce téléphone.'); rbAuto();
+    } else {
+      rbCtlSet({enabled:false,stopReason:''});
+      if(NATIVE&&rbAwait&&confirm('Un envoi est en cours.\n\nOK = l\'arrêter maintenant\nAnnuler = le laisser se terminer')){ try{ ShamanNative.cancel(); }catch(err){} rbSetLive('⛔ Arrêt demandé…'); }
+      toast('⛔ Robot désactivé : plus aucun envoi automatique.');
+    }
+    renderRobot();
+  });
+  box.addEventListener('click',e=>{
+    const pb=e.target.closest('[data-rb-pause]');
+    if(pb){
+      let until;
+      if(pb.dataset.rbPause==='morning'){
+        const d=new Date(), [h,m]=(db.robotSettings.quietTo||'07:00').split(':').map(Number);
+        d.setHours(h||0,m||0,0,0); if(d.getTime()<=Date.now()) d.setDate(d.getDate()+1); until=d.getTime();
+      } else until=Date.now()+(+pb.dataset.rbPause)*60000;
+      rbCtlSet({pausedUntil:until}); toast('⏸ Robot en pause.'); renderRobot(); return;
+    }
+    if(e.target.closest('#rbCtlResume')){ rbResume(); toast('▶ Robot relancé.'); rbAuto(); renderRobot(); return; }
+    if(e.target.closest('#rbCtlStop')){
+      if(!confirm('Arrêt d\'urgence : stopper l\'envoi en cours et désactiver le robot ?')) return;
+      try{ ShamanNative.cancel(); }catch(err){}
+      rbCtlSet({enabled:false,stopReason:'Arrêt d\'urgence manuel.'}); rbSetLive('⛔ Arrêt demandé…'); renderRobot(); return;
+    }
+    if(e.target.closest('#rbCtlBattBtn')){ try{ ShamanNative.requestBatteryExemption(); }catch(err){} setTimeout(renderRobot,1500); }
+  });
+  box.addEventListener('change',e=>{
+    const id=e.target.id;
+    if(id==='rbCtlErr') rbCtlSet({autoStopErr:Math.max(0,Math.min(20,parseInt(e.target.value)||0))});
+    else if(id==='rbCtlBatt') rbCtlSet({minBatt:Math.max(0,Math.min(90,parseInt(e.target.value)||0))});
+    else if(id==='rbCtlSkip') rbCtlSet({skipMissed:e.target.checked});
+    else return;
+    renderRobot();
+  });
+})();
 const rbDate=d=>d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0');
 const rbSched=r=>r.useDefault?db.robotSettings:r;
 function rbQuiet(){const S=db.robotSettings,n=new Date(),m=n.getHours()*60+n.getMinutes(),f=t=>{const[a,b]=t.split(':').map(Number);return a*60+b},a=f(S.quietFrom),b=f(S.quietTo);return a===b?false:(a<b?m>=a&&m<b:m>=a||m<b);}
@@ -4028,7 +4208,8 @@ function rbToday(){const d=new Date();return d.getFullYear()+String(d.getMonth()
 function rbSentToday(){const t0=rbToday();let n=0;db.robotJobs.forEach(j=>(j.log||[]).forEach(l=>{if(rbDate(new Date(l.t))===t0) n+=l.n;}));return n;}
 function rbQuotaLeft(){const S=db.robotSettings;return S.maxPerDay>0?Math.max(0,S.maxPerDay-rbSentToday()):Infinity;}
 function rbGenerate(){
-  const now=new Date(); let ch=false;
+  if(!rbRunning()) return false;
+  const now=new Date(), SB=rbCtl().skipBefore; let ch=false;
   db.robotRules.filter(r=>r.active).forEach(r=>{
     const sc=rbSched(r);
     for(let back=1;back>=0;back--){
@@ -4037,7 +4218,7 @@ function rbGenerate(){
       sc.times.forEach(t=>{
         const [h,m]=t.split(':').map(Number), at=new Date(d.getFullYear(),d.getMonth(),d.getDate(),h,m).getTime();
         const id=r.id+'_'+rbDate(d)+'_'+t.replace(':','');
-        if(at<=r.createdAt||at>Date.now()+6e4||db.robotJobs.some(j=>j.id===id)) return;
+        if(at<=r.createdAt||at<=SB||at>Date.now()+6e4||db.robotJobs.some(j=>j.id===id)) return;
         const jit=db.robotSettings.jitterMin?Math.round((Math.random()*2-1)*db.robotSettings.jitterMin*60000):0;
         db.robotJobs.push({id,ruleId:r.id,at:at+jit,status:'todo',v:r.seq||0,updatedAt:Date.now()}); r.seq=(r.seq||0)+1; r.updatedAt=Date.now(); ch=true;
       });
@@ -4131,6 +4312,7 @@ function rbEnd(d, ev){
   rbAwait = null;
   const j = db.robotJobs.find(x => x.id === d.jobId);
   if(j){ j.tried = 0; if(ev.aborted || ev.type === 'error') j.retryAt = Date.now() + 10 * 60000; saveDB(); }
+  rbCtlNote(ev);
   rbSetLive(ev.type === 'error' ? '⚠️ ' + (ev.message || 'Envoi impossible') : nativeDoneText(ev));
   renderRobot();
 }
@@ -4213,6 +4395,7 @@ function rbRecover(){
 function rbAuto(){
   const S=db.robotSettings;
   if(rbAwait&&Date.now()-rbAwaitAt>6e5&&!NATIVE) rbAwait=null;
+  if(!rbRunning()||!rbBattOk()) return;
   if(NATIVE){
     if(rbAwait||rbQuiet()||rbQuotaLeft()<=0) return;
     const it=rbItems().find(x=>x.c&&!(x.j.retryAt>Date.now())); if(!it) return;
@@ -4269,11 +4452,12 @@ function renderRobot(){
     <div class="meta">${r.source==='base'?'Base « '+escapeHtml((db.phoneBases.find(b=>b.id===r.baseId)||{}).name||'?')+' » (en boucle)':r.source==='groups'?'Contacts / groupes':r.numbers.length+' numéros'} · lots de ${r.batchSize} · ${escapeHtml(r.body.slice(0,60))}</div>
     <div class="row" style="margin-top:6px;gap:6px;flex-wrap:wrap;"><button class="btn btn-primary btn-small" data-rb-now="${r.id}">▶ Lancer maintenant</button><button class="btn btn-secondary btn-small" data-rb-tog="${r.id}">${r.active?'Pause':'Réactiver'}</button><button class="btn btn-danger btn-small" data-rb-del="${r.id}">Supprimer</button></div></div>`;}).join(''):'<div class="empty">Aucune règle.</div>');
   const R=id=>db.robotRules.find(x=>x.id===id);
-  rl.querySelectorAll('[data-rb-now]').forEach(b=>b.onclick=()=>{db.robotJobs.push({id:b.dataset.rbNow+'_now_'+Date.now(),ruleId:b.dataset.rbNow,at:Date.now(),status:'todo',v:R(b.dataset.rbNow).seq||0,updatedAt:Date.now()});const r=R(b.dataset.rbNow);r.seq=(r.seq||0)+1;saveDB();renderRobot();rbAuto();});
+  rl.querySelectorAll('[data-rb-now]').forEach(b=>b.onclick=()=>{db.robotJobs.push({id:b.dataset.rbNow+'_now_'+Date.now(),ruleId:b.dataset.rbNow,at:Date.now(),status:'todo',v:R(b.dataset.rbNow).seq||0,updatedAt:Date.now()});const r=R(b.dataset.rbNow);r.seq=(r.seq||0)+1;saveDB();renderRobot();rbAuto();if(!rbRunning()) toast('Robot arrêté ou en pause : l\'envoi attend dans « À envoyer maintenant » — lancez-le avec ⚡.');});
   rl.querySelectorAll('[data-rb-tog]').forEach(b=>b.onclick=()=>{const r=R(b.dataset.rbTog);r.active=!r.active;r.updatedAt=Date.now();if(r.active)r.createdAt=Date.now();saveDB();renderRobot();});
   rl.querySelectorAll('[data-rb-del]').forEach(b=>b.onclick=()=>{if(!confirm('Supprimer cette règle du robot ?'))return;markDeleted('robotRules',b.dataset.rbDel);db.robotRules=db.robotRules.filter(x=>x.id!==b.dataset.rbDel);db.robotJobs=db.robotJobs.filter(j=>j.ruleId!==b.dataset.rbDel);saveDB();renderRobot();});
   if(document.activeElement.closest&&!document.activeElement.closest('#rbSettingsBox')){ $r('rsAutoOpen').checked=S.autoOpen;$r('rsAutoConfirm').checked=S.autoConfirm;$r('rsTimes').value=S.times.join(', ');$r('rsQF').value=S.quietFrom;$r('rsQT').value=S.quietTo;$r('rsBatch').value=S.batchSize;$r('rsMaxDay').value=S.maxPerDay;$r('rsJitter').value=S.jitterMin;
     $r('rsDays').querySelectorAll('input').forEach(i=>i.checked=S.days.includes(+i.value)); }
+  rbCtlRender(items);
 }
 const rbDaysHtml=(c)=>[1,2,3,4,5,6,0].map(d=>`<label class="check-row"><input type="checkbox" value="${d}" ${c?'checked':''}> ${RB_DAYS[d]}</label>`).join('');
 $r('rbDays').innerHTML=rbDaysHtml(true); $r('rsDays').innerHTML=rbDaysHtml(false);
@@ -4304,6 +4488,7 @@ $r('rbAddBtn').onclick=()=>{
 };
 function rbTick(){
   pushSkipToNative(false);
+  { const C=rbCtl(); if(C.pausedUntil&&C.pausedUntil<=Date.now()) rbResume(); }
   const ch=rbGenerate();
   if(ch&&!rbQuiet()){ if('Notification' in window&&Notification.permission==='granted') new Notification('🤖 SHAMAN PRODUCTION',{body:'Un envoi de SMS est prêt.'}); if(navigator.vibrate) navigator.vibrate([300,150,300]); }
   if($r('tab-robot').classList.contains('active')) renderRobot();
