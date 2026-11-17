@@ -367,7 +367,7 @@ function xlRepondre(texte, explicite) {
 
 /* ================= API publique ================= */
 W.ShamanMoteurJS = {
-  version: '1.38',
+  version: '1.39',
   /* conseil / cours, puis messages XL (même ordre que ShamanNative.moteurRepondre sur Android) */
   repondre: function (texte, explicite) { return moteurRepondre(texte, explicite) || xlRepondre(texte, explicite); },
   /* messages XL seuls (couche « personne + situation » du bot) */
