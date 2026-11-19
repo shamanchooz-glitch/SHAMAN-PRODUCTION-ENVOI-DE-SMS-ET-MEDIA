@@ -1948,6 +1948,7 @@ var UI = {}, CSS = [
 '.cv-meta{display:block;font-size:11px;opacity:.7;margin-top:3px}',
 '.cv-day,.cv-sys{align-self:center;font-size:12px;color:#43647F;background:rgba(255,255,255,.85);border-radius:10px;padding:2px 10px;text-align:center}',
 '.cv-err{color:#C93C52;font-size:13px;padding:2px 12px;background:#EAF5FC}.cv-err:empty{display:none}',
+'.cv-blk{background:#FDECEF;color:#8E2236;font-size:14px;padding:10px 12px;border-top:1px solid #F3C4CC}.cv-blk:empty{display:none}.cv-blk button{display:block;margin-top:8px;width:100%;padding:12px;font-size:15px;font-weight:700;border-radius:12px;border:2px solid #1A7DA8;background:#1A7DA8;color:#fff}',
 '.cv-act{padding:6px 12px 0;background:#EAF5FC}',
 '.cv-pick{cursor:pointer;outline:2px dashed #7FB8D4}',
 '.cv-sel{outline:3px solid #F0528C;background:#FFE3EE !important}',
@@ -2236,7 +2237,7 @@ function buildEmbed(host) {
 }
 
 /* ---- onglet « Conversations » : ce que le chatbot a dit à chaque numéro, et possibilité de répondre soi-même ---- */
-var CV = { A: null, body: null, tail: null, sig: '', timer: null, inp: null, msgs: null, title: null, tg: null, state: null, err: null, errT: null, bot: true, busy: false };
+var CV = { A: null, body: null, tail: null, sig: '', timer: null, inp: null, msgs: null, title: null, tg: null, state: null, err: null, errT: null, bot: true, busy: false, blk: null, num: '', forceBlk: false };
 function natConv() { var X = nat(); return X && typeof X.chatList === 'function' ? X : null; }
 function pj(t, d) { try { return JSON.parse(t); } catch (e) { return d; } }
 function two(n) { return (n < 10 ? '0' : '') + n; }
@@ -2259,7 +2260,7 @@ function convStop() { if (CV.timer) { clearInterval(CV.timer); CV.timer = null; 
 function convStart() { convStop(); if (UI.box) UI.box.classList.add('sb-tall'); CV.timer = setInterval(convTick, 3000); }
 function convTick() {
   if (!CV.A || !CV.A.offsetParent) return;
-  if (CV.tail) paintThread(false); else paintList(false);
+  if (CV.tail) { paintThread(false); paintBlocked(); } else paintList(false);
 }
 function convRoot(A) {
   CV.A = A; A.textContent = ''; A.classList.add('on');
@@ -2289,6 +2290,7 @@ function paintList(force) {
     c.setAttribute('role', 'button'); c.tabIndex = 0;
     top.appendChild(el('b', null, r.name || r.num));
     if (r.bot === false) top.appendChild(el('span', 'cv-pause', '⏸ Pause'));
+    if (numBlocked(r.num || r.tail)) top.appendChild(el('span', 'cv-pause', '🚫 Bloqué'));
     if (r.unread > 0) top.appendChild(el('span', 'cv-badge', String(r.unread)));
     top.appendChild(el('span', null, shortT(r.t)));
     c.appendChild(top);
@@ -2301,7 +2303,7 @@ function paintList(force) {
   bd.scrollTop = keep;
 }
 function showThread(tail) {
-  var A = CV.A; A.textContent = ''; CV.tail = tail; CV.sig = ''; CV.busy = false; CV.sel = {}; CV.selMode = false;
+  var A = CV.A; A.textContent = ''; CV.tail = tail; CV.sig = ''; CV.busy = false; CV.sel = {}; CV.selMode = false; CV.num = ''; CV.forceBlk = false;
   var tb = el('div', 'tb cv-tb'), back = el('button', null, '← Retour');
   back.onclick = function () { showList(); refreshSeg(); };
   CV.title = el('b', 'cv-title', '');
@@ -2317,6 +2319,7 @@ function showThread(tail) {
   CV.state = el('div', 'cv-state'); A.appendChild(CV.state);
   CV.msgs = el('div', 'bd cv-msgs'); A.appendChild(CV.msgs);
   CV.err = el('div', 'cv-err'); A.appendChild(CV.err);
+  CV.blk = el('div', 'cv-blk'); A.appendChild(CV.blk);
   var act = el('div', 'cv-act'), bb = el('button', null, '🤖 Faire répondre le chatbot'); bb.onclick = botNow; act.appendChild(bb);
   CV.ad = el('button', 'pri', ''); CV.ad.style.cssText = 'display:none;margin-left:6px'; CV.ad.onclick = learnSelected; act.appendChild(CV.ad); A.appendChild(act);
   var f = el('div', 'sb-i'); CV.inp = el('input'); CV.inp.type = 'text'; CV.inp.placeholder = 'Écrire un SMS à cette personne…'; CV.inp.setAttribute('enterkeyhint', 'send');
@@ -2341,6 +2344,8 @@ function paintThread(force) {
   var th = pj(raw, {}), ms = th.msgs || [], box = CV.msgs;
   var near = force || (box.scrollHeight - box.scrollTop - box.clientHeight < 80);
   CV.title.textContent = th.name || th.num || CV.tail;
+  CV.num = th.num || CV.num;
+  paintBlocked();
   CV.bot = th.bot !== false; paintToggle();
   box.textContent = '';
   var day = '';
@@ -2382,6 +2387,27 @@ function flash(t) {
   if (CV.errT) clearTimeout(CV.errT);
   CV.errT = setTimeout(function () { if (CV.err) CV.err.textContent = ''; }, 7000);
 }
+/* numéro bloqué : bandeau fixe avec le bouton « Débloquer » (la liste des bloqués est celle de l'onglet « Bloqués ») */
+function numBlocked(n) { try { return !!(n && W.shamanIsBlocked && W.shamanIsBlocked(n)); } catch (e) { return false; } }
+function paintBlocked() {
+  if (!CV.blk || !CV.tail) return;
+  var b = CV.forceBlk || numBlocked(CV.num || CV.tail);
+  if (!b) { if (CV.blk.firstChild) CV.blk.textContent = ''; return; }
+  if (CV.blk.firstChild) return;
+  CV.blk.appendChild(el('div', null, '🚫 Ce numéro est bloqué : aucun SMS ne lui est envoyé (ni vos messages, ni les réponses du chatbot, ni les envois groupés).'));
+  var u = el('button', null, '🔓 Débloquer ce numéro'); u.onclick = unblockNow; CV.blk.appendChild(u);
+}
+function unblockNow() {
+  var n = CV.num || CV.tail;
+  if (!W.shamanUnblock) { flash('Déblocage impossible ici : ouvrez l’onglet « Bloqués ».'); return; }
+  if (!W.confirm('Débloquer ' + n + ' ?\nVous pourrez de nouveau lui écrire, et le chatbot pourra lui répondre.')) return;
+  try { W.shamanUnblock(n); } catch (e) {}
+  CV.forceBlk = false;
+  var still = numBlocked(n) || (W.shamanNativeBlocked ? W.shamanNativeBlocked(n) : false);
+  if (CV.blk) CV.blk.textContent = '';
+  if (still) { CV.forceBlk = true; paintBlocked(); flash('Ce numéro est encore bloqué. Réessayez, ou ouvrez l’onglet « Bloqués ».'); return; }
+  flash('✅ Numéro débloqué : vous pouvez de nouveau lui écrire et le chatbot peut lui répondre.');
+}
 function toggleBot() {
   var X = natConv(); if (!X || !CV.tail) return;
   CV.bot = !CV.bot;
@@ -2395,7 +2421,7 @@ function sendNow() {
   var r = { ok: false, err: 'Envoi impossible.' };
   try { r = pj(X.chatSend(CV.tail, v), r); } catch (e) {}
   CV.busy = false;
-  if (r.ok) { CV.inp.value = ''; CV.err.textContent = ''; paintThread(true); } else flash(r.err || 'Envoi impossible.');
+  if (r.ok) { CV.inp.value = ''; CV.err.textContent = ''; paintThread(true); } else { if (/bloqu/i.test(r.err || '')) { CV.forceBlk = true; paintBlocked(); } flash(r.err || 'Envoi impossible.'); }
 }
 function botNow() {
   var X = natConv(); if (!X || !CV.tail || CV.busy) return;
@@ -2403,7 +2429,7 @@ function botNow() {
   var r = { ok: false, err: 'Le chatbot n’a pas pu répondre.' };
   try { r = pj(X.chatBotReply(CV.tail), r); } catch (e) {}
   CV.busy = false;
-  if (r.ok) { CV.err.textContent = ''; paintThread(true); } else flash(r.err || 'Le chatbot n’a pas pu répondre.');
+  if (r.ok) { CV.err.textContent = ''; paintThread(true); } else { if (/bloqu/i.test(r.err || '')) { CV.forceBlk = true; paintBlocked(); } flash(r.err || 'Le chatbot n’a pas pu répondre.'); }
 }
 function badge() {
   var X = natConv(), b = D.querySelector('[data-tab="assistant"]'); if (!X || !b) return;

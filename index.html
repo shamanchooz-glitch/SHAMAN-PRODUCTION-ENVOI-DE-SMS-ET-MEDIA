@@ -1060,6 +1060,15 @@
       <button class="btn btn-danger" id="addBlockedBtn">🚫 Bloquer</button>
     </div>
     <div class="card">
+      <h2>🔍 Vérifier un numéro</h2>
+      <input type="text" inputmode="tel" id="blockedCheckInput" placeholder="Numéro, dans n'importe quel format…" style="margin-bottom:8px;">
+      <div class="row">
+        <button class="btn btn-secondary" id="blockedCheckBtn">Vérifier</button>
+        <button class="btn btn-secondary" id="blockedResyncBtn">🔄 Renvoyer la liste à l'envoi SMS</button>
+      </div>
+      <div id="blockedCheckResult" class="dim" style="margin-top:8px;font-size:13px;white-space:pre-line;"></div>
+    </div>
+    <div class="card">
       <h2>Numéros bloqués (<span id="blockedCount">0</span>)</h2>
       <input type="text" inputmode="tel" id="blockedFilterInput" placeholder="Rechercher un numéro bloqué…" style="margin-bottom:10px;">
       <div id="blockedList"><div class="empty">Aucun numéro bloqué.</div></div>
@@ -1264,6 +1273,7 @@ function phoneKey(n){
   const d = asciiDigits(n).replace(/\D/g, '');
   return d.length >= 8 ? d.slice(-8) : d;
 }
+function blkTouch(){ _blkArr = null; }
 function blockedSetNow(){
   const a = db.blockedNumbers, n = a.length;
   const edge = n ? (a[0].number + '|' + a[n - 1].number + '|' + (a[n >> 1].number)) : '';
@@ -1627,7 +1637,11 @@ async function syncNow(code, opts){
     db = mergeDb(db, remote);
     const changed = JSON.stringify(db) !== before;
     localStorage.setItem(DB_KEY, JSON.stringify(db));
+    _firstSyncDone = true;
+    blkTouch();
     if(changed) refreshEverything();
+    // Un numéro bloqué depuis un autre téléphone doit aussi être bloqué ICI, dans l'envoi SMS : on renvoie la liste.
+    try{ if(typeof pushSkipToNative === 'function') pushSkipToNative(false); }catch(e){}
 
     // 3) Envoi du résultat fusionné.
     await syncPushChunked(code, db);
@@ -1695,6 +1709,11 @@ document.addEventListener('visibilitychange', () => {
   const code = getSyncCode();
   if(document.visibilityState === 'visible' && code && isAutoSyncOn()) syncNow(code, { silent: true });
 });
+// Toutes les 4 minutes tant que l'écran est ouvert : un numéro bloqué sur un autre téléphone arrive ici sans attendre.
+setInterval(() => {
+  const code = getSyncCode();
+  if(document.visibilityState === 'visible' && navigator.onLine && code && isAutoSyncOn()) syncNow(code, { silent: true });
+}, 240000);
 
 
 
@@ -2053,7 +2072,7 @@ smsBody.addEventListener('input', () => {
    sans ouvrir l'appli SMS, avec choix automatique de la SIM. */
 const NATIVE = !!window.ShamanNative;
 /* Version affichée : celle de l'APK installé (versionName) ; hors APK (page web), version de ces fichiers. */
-const APP_VERSION = (function(){ try{ const v = window.ShamanNative && ShamanNative.appVersion && ShamanNative.appVersion(); if(v) return String(v); }catch(e){} return '1.39'; })();
+const APP_VERSION = (function(){ try{ const v = window.ShamanNative && ShamanNative.appVersion && ShamanNative.appVersion(); if(v) return String(v); }catch(e){} return '1.40'; })();
 const nativeCbs = {};
 window.onShamanSms = function(json){
   try{ const e = JSON.parse(json); const cb = nativeCbs[e.id]; if(cb) cb(e); if(e.type === 'done') delete nativeCbs[e.id]; }catch(err){}
@@ -2087,13 +2106,33 @@ function smsPartsText(t){
   if(b.parts < a.parts) r += ` · version simplifiée : ${b.parts} SMS`;
   return r;
 }
-let _skipSig = '';
-function pushSkipToNative(force){
+var _skipSig = '', _firstSyncDone = false;
+// Empreinte de TOUTE la liste (et pas seulement sa taille et ses bords) : bloquer un numéro et en débloquer un autre
+// donne la même taille, l'ancienne signature ne voyait alors aucun changement et la liste du téléphone restait périmée.
+function blkHash(){
+  blockedSetNow();
+  let h = 0;
+  _blkKeys.forEach(k => { let x = 5381; for(let i = 0; i < k.length; i++) x = ((x << 5) + x + k.charCodeAt(i)) | 0; h = (h + x) | 0; });
+  return _blkKeys.size + ':' + h;
+}
+// user = true : action volontaire de la personne (bloquer, débloquer) → on envoie toujours, même une liste vide.
+// Sinon, une liste vide au démarrage, avant la première synchro, n'écrase pas la liste déjà gardée sur le téléphone
+// (par exemple après un effacement des données du navigateur intégré).
+function pushSkipToNative(force, user){
   if(!NATIVE) return;
-  const sig = blockedSetNow().size + '|' + unrSet().size + '|' + _blkEdge;
+  blockedSetNow();
+  if(!user && _blkKeys.size === 0 && getSyncCode() && !_firstSyncDone) return;
+  const sig = blkHash() + '|' + unrSet().size;
   if(!force && sig === _skipSig) return;
   _skipSig = sig;
   try{ ShamanNative.setSkip(JSON.stringify({ blocked: [...blockedSetNow()], aside: [...unrSet()] })); }catch(e){}
+}
+// Renvoie tout de suite la liste des bloqués à la couche d'envoi du téléphone (SMS en lot, réponses automatiques, appels manqués, conversations).
+function pushBlockedEverywhere(){
+  blkTouch();
+  pushSkipToNative(true, true);
+  try{ arPush(true); }catch(e){}
+  try{ crPush(true); }catch(e){}
 }
 function nativeSend(numbers, body, onEvent, bodies, extra){
   pushSkipToNative(true);
@@ -4546,26 +4585,26 @@ function renderBlockedList(filter){
       const b = db.blockedNumbers.find(x => x.id === btn.dataset.unblock);
       if(!b) return;
       if(!confirm(`Débloquer le numéro ${b.number} ?`)) return;
-      markDeleted('blockedNumbers', b.id);
-      db.blockedNumbers = db.blockedNumbers.filter(x => x.id !== b.id);
-      saveDB();
-      renderBlockedList(document.getElementById('blockedFilterInput').value);
+      unblockByNumber(b.number);
     });
   });
 }
 
 document.getElementById('addBlockedBtn').addEventListener('click', () => {
   const dial = document.getElementById('blockedCountry').value;
-  const parsed = parseNumbersBulk(document.getElementById('blockedNumbersInput').value, dial);
-  if(!parsed.length){ alert('Aucun numéro valide détecté.'); return; }
-  const existing = new Set(db.blockedNumbers.map(b => b.number));
+  const pb = parseBlockInput(document.getElementById('blockedNumbersInput').value, dial);
+  const parsed = pb.numbers;
+  if(!parsed.length){ alert('Aucun numéro valide détecté.' + (pb.ignored.length ? '\n\nNon reconnu : ' + pb.ignored.slice(0, 8).join(' ; ') : '')); return; }
+  const existing = new Set(db.blockedNumbers.map(b => phoneKey(b.number)).filter(Boolean));
   let added = 0;
   parsed.forEach(n => {
-    if(existing.has(n)) return;
+    const k = phoneKey(n);
+    if(existing.has(k)) return;
     db.blockedNumbers.push({ id: 'blk' + Date.now() + Math.random().toString(36).slice(2,7), number: n, addedAt: Date.now() });
-    existing.add(n);
+    existing.add(k);
     added++;
   });
+  blkTouch();
   // Nettoyage immédiat : un numéro qui vient d'être bloqué ne doit plus
   // traîner nulle part, même s'il était déjà présent avant le blocage.
   let removedFromBases = 0;
@@ -4576,6 +4615,7 @@ document.getElementById('addBlockedBtn').addEventListener('click', () => {
   });
   document.getElementById('blockedNumbersInput').value = '';
   saveDB();
+  pushBlockedEverywhere();
   renderBlockedList('');
   const smsB = document.getElementById('smsBatches');
   if(smsB && smsB.children.length){ smsB.innerHTML = '<div class="empty">Un numéro vient d\'être bloqué : les lots affichés ont été retirés. Régénérez-les pour continuer.</div>'; }
@@ -4584,6 +4624,7 @@ document.getElementById('addBlockedBtn').addEventListener('click', () => {
   let msg = `${added} numéro${added>1?'s':''} bloqué${added>1?'s':''}.${parsed.length - added > 0 ? ' (' + (parsed.length - added) + ' déjà bloqué(s))' : ''}`;
   if(removedFromBases > 0) msg += `\n🚫 ${removedFromBases} numéro${removedFromBases>1?'s':''} retiré${removedFromBases>1?'s':''} des bases existantes.`;
   if(removedFromContacts > 0) msg += `\n🚫 Numéro retiré de ${removedFromContacts} contact${removedFromContacts>1?'s':''} (le contact reste, sans numéro).`;
+  if(pb.ignored.length) msg += `\n⚠️ ${pb.ignored.length} élément${pb.ignored.length>1?'s':''} non reconnu${pb.ignored.length>1?'s':''} (pas bloqué${pb.ignored.length>1?'s':''}) : ` + pb.ignored.slice(0, 8).join(' ; ') + (pb.ignored.length > 8 ? ' …' : '');
   alert(msg);
 });
 
@@ -4624,6 +4665,82 @@ function repairIvorianNumbers(){
   if(changed) saveDB();
   return changed;
 }
+
+/* Saisie des numéros à bloquer, tolérante : retours à la ligne, virgules, points-virgules, barres, « et » / « ou »,
+   noms collés au numéro, chiffres arabes, plusieurs numéros collés bout à bout. Ce qui n'est pas reconnu est signalé
+   (jamais ignoré en silence). */
+function parseBlockInput(text, defaultDial){
+  const out = [], ignored = [], seen = new Set();
+  const t = asciiDigits(String(text || ''));
+  const tokens = t.split(/[\n\r\t,;|]+|\s\/\s|\s+(?:et|ou|and)\s+/i).map(x => x.trim()).filter(Boolean);
+  const add = raw => {
+    const n = normalizePhone(raw, defaultDial);
+    const k = phoneKey(n);
+    if(n && k && !seen.has(k)){ seen.add(k); out.push(n); }
+  };
+  tokens.forEach(tok => {
+    const digits = tok.replace(/\D/g, '');
+    if(!digits) { ignored.push(tok.slice(0, 30)); return; }
+    if(digits.length < 7){ ignored.push(tok.slice(0, 30)); return; }
+    if(digits.length <= 15){ add(tok); return; }
+    // trop long : plusieurs numéros collés ? (10 chiffres à la suite, ou 13 chiffres commençant par 225)
+    if(digits.length % 13 === 0 && digits.startsWith('225')){ for(let i = 0; i < digits.length; i += 13) add('+' + digits.slice(i, i + 13)); return; }
+    if(digits.length % 10 === 0 && digits.startsWith('0')){ for(let i = 0; i < digits.length; i += 10) add(digits.slice(i, i + 10)); return; }
+    ignored.push(tok.slice(0, 30));
+  });
+  return { numbers: out, ignored };
+}
+
+// Débloque un numéro quel que soit le format sous lequel il a été enregistré (toutes les entrées qui ont la même clé),
+// puis renvoie tout de suite la liste au téléphone : l'envoi SMS, les réponses automatiques et les conversations repartent.
+function unblockByNumber(any){
+  const k = phoneKey(any);
+  let removed = 0;
+  if(k){
+    const keep = [];
+    db.blockedNumbers.forEach(b => { if(phoneKey(b.number) === k){ markDeleted('blockedNumbers', b.id); removed++; } else keep.push(b); });
+    if(removed) db.blockedNumbers = keep;
+  }
+  blkTouch();
+  if(removed) saveDB();
+  pushBlockedEverywhere();
+  try{ renderBlockedList((document.getElementById('blockedFilterInput') || {}).value || ''); }catch(e){}
+  return removed;
+}
+window.shamanIsBlocked = function(n){ try{ return !!n && isBlocked(String(n)); }catch(e){ return false; } };
+window.shamanUnblock = function(n){ try{ return unblockByNumber(n); }catch(e){ return 0; } };
+window.shamanNativeBlocked = function(n){ try{ return JSON.parse(ShamanNative.blockedCheck(asciiDigits(n))).blocked === true; }catch(e){ return false; } };
+
+// Vérifier un numéro : ce que voit la page ET ce que voit l'envoi SMS du téléphone.
+function blkNative(num){ try{ return JSON.parse(ShamanNative.blockedCheck(asciiDigits(num))); }catch(e){ return null; } }
+document.getElementById('blockedCheckBtn').addEventListener('click', () => {
+  const box = document.getElementById('blockedCheckResult');
+  const raw = document.getElementById('blockedCheckInput').value.trim();
+  const k = phoneKey(raw);
+  if(!k || k.length < 7){ box.textContent = 'Écrivez un numéro (au moins 7 chiffres).'; return; }
+  const hits = db.blockedNumbers.filter(b => phoneKey(b.number) === k);
+  let t = hits.length ? `🚫 Dans la liste des bloqués : ${hits.map(b => b.number).join(', ')}` : '✅ Ce numéro n\'est pas dans la liste des bloqués.';
+  if(NATIVE){
+    let nv = blkNative(raw);
+    if(nv && typeof nv.blocked === 'boolean'){
+      if(hits.length && !nv.blocked){ pushBlockedEverywhere(); nv = blkNative(raw) || nv; t += '\n🔄 La liste du téléphone était en retard : elle vient d\'être renvoyée.'; }
+      t += nv.blocked ? '\n📱 Envoi SMS de ce téléphone : 🚫 bloqué (aucun SMS ne partira).' : '\n📱 Envoi SMS de ce téléphone : pas bloqué.';
+      t += `\n(${nv.count} numéro(s) bloqué(s) connus de l'envoi SMS, ${blockedSetNow().size} dans la page.)`;
+    }else{
+      t += '\n📱 Cette version de l\'application ne permet pas de lire la liste de l\'envoi SMS : installez la dernière version.';
+    }
+  }else{
+    t += '\n(Version web : le contrôle se fait dans la page.)';
+  }
+  box.textContent = t;
+});
+document.getElementById('blockedResyncBtn').addEventListener('click', () => {
+  const box = document.getElementById('blockedCheckResult');
+  pushBlockedEverywhere();
+  let t = `🔄 Liste renvoyée : ${blockedSetNow().size} numéro(s) bloqué(s) dans la page.`;
+  if(NATIVE){ const nv = blkNative('0'); if(nv && nv.count !== undefined) t += `\n📱 L'envoi SMS du téléphone en connaît maintenant ${nv.count}.`; }
+  box.textContent = t;
+});
 
 function parseNumbersBulk(text, defaultDial){
   const tokens = (text || '').split(/[\n,;]+/).map(t => t.trim()).filter(Boolean);
