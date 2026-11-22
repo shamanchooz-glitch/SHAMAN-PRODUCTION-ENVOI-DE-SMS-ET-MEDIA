@@ -691,16 +691,21 @@ function kbAnswer(text) {
       return { missing: true, key: TITLES[i], lab: t.lab, text: i === 3 ? PRICE_MISSING : OTHER_MISSING };
     }
   }
-  var T = toks(text), best = null, bs = 0;
+  return kbQA(text);
+}
+/* Réponses types « Q: question => réponse » écrites par le gérant (onglet Instructions / Consignes) */
+function kbQA(text) {
+  var k = KB();
+  var T = toks(text), best = null, bs = 0, ex = false;
   k.F.forEach(function (f) {
     var E = toks(f.q); if (!E.length) return;
     /* une réponse apprise ne s’étire pas : le message doit ressembler à la question (pas un long message qui contient un de ses mots) */
     if (E.length === 1 ? T.length > 2 : T.length > E.length + 4) return;
     var m = E.filter(function (w) { return hit(T, w); }).length, sc = m / E.length;
     /* la question doit être couverte (≥ 75 %) ET faire l’essentiel du message (≥ 60 %) ; à égalité, la ligne la plus basse (la plus récente) gagne */
-    if (m >= Math.min(2, E.length) && sc >= 0.75 && m / Math.max(T.length, 1) >= 0.6 && sc >= bs) { bs = sc; best = f.a; }
+    if (m >= Math.min(2, E.length) && sc >= 0.75 && m / Math.max(T.length, 1) >= 0.6 && sc >= bs) { bs = sc; best = f.a; ex = (m === E.length && E.length === T.length); }
   });
-  return best === null ? null : { text: best, q: true };
+  return best === null ? null : { text: best, q: true, exact: ex };
 }
 /* dans un dossier en cours : réponse courte, puis retour à la question du dossier */
 function kbSide(kb) { return kb.missing ? (kb.key === 'Tarifs' ? kb.text : 'Un conseiller vous donnera cette information.') : kb.text; }
@@ -756,7 +761,7 @@ function extract(text) {
   var n = N(text), o = {}, m, found = [];
   var tel = phoneOf(text); if (tel) o.tel = tel;
   if ((m = String(text).match(/(?:je m ?['\u2019]?appelle|mon nom (?:est|c['\u2019 ]?est)|moi c['\u2019 ]?est|appelez[- ]moi|mon nom\s*:)\s+([A-Za-z\u00C0-\u00FF'\u2019 -]{2,40})/i))) { var nmv = cap(m[1].replace(/\s+(?:et|je|qui)\b.*|\s+j['\u2019].*/i, '').trim()); if (nmv) o.nom = nmv; }
-  if ((m = n.match(/\bj ai (\d{2}) ans\b/))) { o.majeur = +m[1] >= 18; n = n.replace(m[0], ' '); }
+  if ((m = n.match(/\bj ai (\d{2}) ans\b(?! (?:d|de) (?:experience|expe|metier|service|travail|anciennete|pratique))/))) { o.age = +m[1]; n = n.replace(m[0], ' '); }
   JOBS.forEach(function (j) { if (j[1].test(n) && found.length < 2) found.push(j[0]); });
   if (found.length) o.metier = found.join(', ');
   if ((m = n.match(VRE))) o.commune = cap(m[1]);
@@ -772,7 +777,7 @@ var Q = function () { return Array.prototype.slice.call(arguments); };
 var FLOWS = {
   candidat: { titre: 'Recherche d’emploi', slots: [
     { k: 'nom', lab: 'Nom', q: Q('Quel est votre nom complet ?', 'Comment vous appelez-vous ?') },
-    { k: 'majeur', lab: '18 ans ou plus', q: Q('Avez-vous 18 ans ou plus ?'), chips: ['Oui', 'Non'] },
+    { k: 'age', lab: 'Âge', q: Q('Quel est votre âge ?', 'Quel âge avez-vous ?') },
     { k: 'metier', lab: 'Travail recherché', q: Q('Quel type de travail cherchez-vous ?', 'Quel métier ou poste souhaitez-vous ?') },
     { k: 'experience', lab: 'Expérience', q: Q('Combien d’années d’expérience avez-vous ?'), chips: ['Débutant(e)', '1 à 2 ans', '3 ans et plus'] },
     { k: 'commune', lab: 'Commune', q: Q('Dans quelle commune habitez-vous ?', 'Où habitez-vous exactement ?') },
@@ -799,16 +804,29 @@ var FLOWS = {
 };
 var MENU = ['Je cherche un emploi', 'Je cherche du personnel', 'J’ai besoin d’un service', 'Informations'];
 
-var SYN = { nom: 'nom prenom', tel: 'numero telephone whatsapp contact tel', metier: 'travail poste metier service profil', commune: 'commune lieu quartier ville adresse', dispo: 'date disponibilite debut quand', experience: 'experience annee', nombre: 'nombre personne', conditions: 'salaire condition', details: 'precision detail', majeur: 'age majeur' };
+var SYN = { nom: 'nom prenom', tel: 'numero telephone whatsapp contact tel', metier: 'travail poste metier service profil', commune: 'commune lieu quartier ville adresse', dispo: 'date disponibilite debut quand', experience: 'experience annee', nombre: 'nombre personne', conditions: 'salaire condition', details: 'precision detail', age: 'age ans' };
 function slotDef(c, k) { var s = FLOWS[c.flow].slots; for (var i = 0; i < s.length; i++) if (s[i].k === k) return s[i]; }
 function nextSlot(c) { var s = FLOWS[c.flow].slots; for (var i = 0; i < s.length; i++) if (c.slots[s[i].k] === undefined) return s[i]; return null; }
 function inFlow(c, k) { return !!slotDef(c, k); }
 
+/* Âge donné par la personne : « 25 », « 25 ans », « j’ai 25 ans », « vingt cinq ans » → nombre (5 à 99), sinon undefined (on redemande) */
+var AGEW = { 'dix sept': 17, 'dix huit': 18, 'dix neuf': 19, onze: 11, douze: 12, treize: 13, quatorze: 14, quinze: 15, seize: 16, dix: 10 };
+var AGET = { vingt: 20, trente: 30, quarante: 40, cinquante: 50, soixante: 60 };
+var AGEU = { un: 1, une: 1, deux: 2, trois: 3, quatre: 4, cinq: 5, six: 6, sept: 7, huit: 8, neuf: 9 };
+function ageOf(n) {
+  var re = /\b(\d{1,2})\b/g, mm, w, m2;
+  while ((mm = re.exec(n))) { if (+mm[1] >= 5 && +mm[1] <= 99) return +mm[1]; }
+  for (w in AGEW) if (new RegExp('\\b' + w + '\\b').test(n)) return AGEW[w];
+  if ((m2 = n.match(/\b(vingt|trente|quarante|cinquante|soixante)(?: et)?(?: (un|une|deux|trois|quatre|cinq|six|sept|huit|neuf))?\b/))) return AGET[m2[1]] + (m2[2] ? AGEU[m2[2]] : 0);
+  return undefined;
+}
+function showVal(s, v) { if (v === true) return 'Oui'; if (s.k === 'age' && typeof v === 'number') return v + ' ans'; return v; }
+
 function direct(k, text) {
   var n = N(text), t = String(text).trim(), m;
-  if (k !== 'majeur' && R(/^(oui|ok|okay|merci|bonjour|bonsoir|salut|d accord|stop|annuler|corriger|recommencer)\b/, n)) return undefined;
+  if (k !== 'age' && R(/^(oui|ok|okay|merci|bonjour|bonsoir|salut|d accord|stop|annuler|corriger|recommencer)\b/, n)) return undefined;
   if ((k === 'nom' || k === 'metier' || k === 'commune' || k === 'dispo' || k === 'nombre') && R(/^(non|nan)\b/, n)) return undefined;
-  if (R(/\b(je ne sais pas|sais pas|plus tard|passer|pas encore|aucune idee)\b/, n)) return k === 'majeur' ? undefined : '__skip';
+  if (R(/\b(je ne sais pas|sais pas|plus tard|passer|pas encore|aucune idee)\b/, n)) return k === 'age' ? undefined : '__skip';
   if (k === 'nom') {
     t = t.replace(/^(?:je suis|c['\u2019 ]?est|moi c['\u2019 ]?est|mon nom est|je m['\u2019 ]?appelle|appelez[- ]moi)\s+/i, '').replace(/[.!]+$/, '');
     if (R(/^(j|je|il|elle|on|nous|ils|mon|ma|mes|ca|ce|cette|il y)\b/, N(t)) || R(/\b(aime|aimes|adore|fait|chaud|froid|veux|vais|pense|travaille|habite|cherche|besoin|merci|pourquoi|comment|quoi|oui|non|fatigue|fatigue|content|contente|triste|malade|occupe|occupee|pret|prete|desole|desolee|ici|bien|mal)\b/, N(t))) return undefined;
@@ -816,10 +834,7 @@ function direct(k, text) {
   }
   if ((k === 'metier' || k === 'commune') && (R(/^(quel|quelle|quels|quelles|comment|pourquoi|combien|qui|ou|quand|explique\w*|donne\w*|raconte\w*|dis moi|fais moi|ecris|apprends|c est quoi|qu est ce)\b/, n) || R(/\b(heure|blague|devinette|meteo|cours)\b/, n) || n.split(' ').length > 8)) return undefined;
   if (k === 'tel') return phoneOf(t) || undefined;
-  if (k === 'majeur') {
-    if ((m = n.match(/\b(\d{2})\b/))) return +m[1] >= 18;
-    if (no(n)) return false; if (yes(n)) return true; return undefined;
-  }
+  if (k === 'age') return ageOf(n);
   if (k === 'experience') {
     if ((m = n.match(/(\d{1,2})/))) return m[1] + ' an' + (+m[1] > 1 ? 's' : '');
     if (R(/(debutant|aucune|sans|jamais|pas d)/, n)) return 'Débutant(e)';
@@ -835,8 +850,8 @@ function chipsOf(s) { return (S.choices === false) ? [] : (s.chips || []); }
 function fill(c, text) {
   var got = extract(text), cnt = 0, applied = 0, k, a = c.asked, v, d, ci;
   d = a ? slotDef(c, a) : null;
-  if (d && d.chips && a !== 'majeur') { for (ci = 0; ci < d.chips.length; ci++) if (N(d.chips[ci]) === N(text)) { c.slots[a] = d.chips[ci]; return 1; } }
-  if (a === 'majeur') { v = direct('majeur', text); if (v !== undefined && v !== '__skip') { c.slots.majeur = v; cnt++; delete got.experience; delete got.majeur; } }
+  if (d && d.chips && a !== 'age') { for (ci = 0; ci < d.chips.length; ci++) if (N(d.chips[ci]) === N(text)) { c.slots[a] = d.chips[ci]; return 1; } }
+  if (a === 'age') { v = direct('age', text); if (v !== undefined && v !== '__skip') { c.slots.age = v; cnt++; delete got.experience; delete got.age; } }
   for (k in got) if (inFlow(c, k) && (c.slots[k] === undefined || k === a)) { c.slots[k] = got[k]; cnt++; applied++; }
   if (a === 'commune' && c.slots.commune && applied) { v = direct('commune', text); if (v && v !== '__skip' && v.split(/\s+/).length <= 4) c.slots.commune = cap(v); }
   if (a && c.slots[a] === undefined && !applied) {
@@ -862,7 +877,7 @@ function ask(c, s) {
 function greeting() { var h = new Date().getHours(); return h < 18 ? 'Bonjour' : 'Bonsoir'; }
 function recap(c) {
   var f = FLOWS[c.flow];
-  return f.slots.map(function (s) { var v = c.slots[s.k]; if (v === true) v = 'Oui'; return '• ' + s.lab + ' : ' + v; }).join('\n');
+  return f.slots.map(function (s) { return '• ' + s.lab + ' : ' + showVal(s, c.slots[s.k]); }).join('\n');
 }
 function out(m, chips) { return { m: m.filter(Boolean), chips: chips || [] }; }
 function mainQ(c) { c.asked = null; return out(['Comment puis-je vous aider ?'], MENU); }
@@ -875,7 +890,7 @@ function startFlow(c, id, text) {
     id === 'employeur' ? ['Avec plaisir.', 'Je note votre besoin en quelques questions.'] : ['Avec plaisir.', 'Je note votre demande en quelques questions.']);
 }
 function advance(c, lead) {
-  if (c.slots.majeur === false) { var m = ['Merci de votre franchise.', 'Nous travaillons uniquement avec des personnes majeures.', 'Revenez nous voir à vos 18 ans.']; reset(c); return out(m); }
+  if (typeof c.slots.age === 'number' && c.slots.age < 18) { var m = ['Merci de votre franchise.', 'Nous travaillons uniquement avec des personnes majeures.', 'Revenez nous voir à vos 18 ans.']; reset(c); return out(m); }
   var s = nextSlot(c);
   if (!s) { c.stage = 'confirm'; c.asked = null; return out(lead.concat(['Voici votre dossier :', recap(c), 'Tout est correct ?']), ['Oui, c’est correct', 'Corriger']); }
   c.stage = 'ask';
@@ -886,7 +901,7 @@ function reset(c) { c.flow = null; c.slots = {}; c.stage = null; c.asked = null;
 function saveDossier(c) {
   var d = { ref: 'SC-' + new Date().toISOString().slice(2, 10).replace(/-/g, '') + '-' + ('000' + (++S.seq)).slice(-3),
     type: FLOWS[c.flow].titre, flow: c.flow, contact: c.id, date: new Date().toISOString(), statut: 'Nouveau', champs: {} };
-  FLOWS[c.flow].slots.forEach(function (s) { var v = c.slots[s.k]; d.champs[s.lab] = v === true ? 'Oui' : v; });
+  FLOWS[c.flow].slots.forEach(function (s) { d.champs[s.lab] = showVal(s, c.slots[s.k]); });
   S.dossiers.unshift(d); c.known = c.known || {};
   if (c.slots.nom) c.known.nom = c.slots.nom; if (c.slots.tel) c.known.tel = c.slots.tel;
   save(); try { if (typeof API.onDossier === 'function') API.onDossier(d); } catch (e) {}
@@ -1691,7 +1706,7 @@ function think(c, text) {
   /* confirmation / correction */
   if (c.flow && c.stage === 'confirm') {
     var g = extract(text), changed = 0, k;
-    for (k in g) if (inFlow(c, k) && !(k === 'majeur')) { c.slots[k] = g[k]; changed++; }
+    for (k in g) if (inFlow(c, k) && !(k === 'age')) { c.slots[k] = g[k]; changed++; }
     if (changed && !yes(n)) return advance(c, ['C’est corrigé.']);
     if (yes(n) && !no(n)) {
       var d = saveDossier(c), f = fn(c); reset(c); c.asked = 'more';
@@ -1706,7 +1721,7 @@ function think(c, text) {
       return toks(s.lab + ' ' + SYN[s.k]).some(function (w) { return hit(T, w); });
     })[0], g2 = extract(text), ch2 = 0, k2;
     if (sl) { delete c.slots[sl.k]; c.stage = 'ask'; return out(['Bien sûr.', ask(c, sl)], chipsOf(sl)); }
-    for (k2 in g2) if (inFlow(c, k2) && k2 !== 'majeur') { c.slots[k2] = g2[k2]; ch2++; }
+    for (k2 in g2) if (inFlow(c, k2) && k2 !== 'age') { c.slots[k2] = g2[k2]; ch2++; }
     if (ch2) return advance(c, ['C’est corrigé.']);
     return out(['Quelle information voulez-vous corriger ?'], FLOWS[c.flow].slots.map(function (s) { return s.lab; }));
   }
@@ -1745,12 +1760,19 @@ function think(c, text) {
     if (c.fails >= 3 && s1 && s1.opt) { c.slots[s1.k] = 'Non précisé'; c.fails = 0; return advance(c, ['Pas de souci.']); }
     return out(['Je n’ai pas bien compris.', s1 ? ask(c, s1) : 'Pouvez-vous répéter ?'], s1 ? chipsOf(s1) : []);
   }
-  if (!c.flow) { var sf0 = sitFollow(c, text, n); if (sf0) return sf0; }
-  if (!c.flow && R(/(comment|conseil|astuce|que faut il|quels documents|quelle difference)/, n)) { var ex0 = findExpert(toks(text)); if (ex0) return expertReply(c, ex0); }
   /* intentions */
   var emp = /(cherch|besoin|veux|voudrais|souhait|aimerais|faut|recrut|embauch|engag|trouv|vous avez|avez vous|vous auriez|auriez vous)\w*.{0,40}(personnel|employe|ouvrier|ouvriere|menagere|nounou|gardien|servante|servantes|gouvernante|repasseuse|blanchisseuse|aide a domicile|garder (mes |mon |ma |nos |notre |un |une |des |le |la |les )?(enfant|enfants|bebe|bebes|petit|petits|fils|fille|gamin|gamins)\b|s occuper de (mes |mon |ma |notre |nos )(enfant|enfants|bebe|mere|pere|parents|grand mere|grand pere)|cuisinier|cuisiniere|chauffeur|vendeu|bonne(?! (annee|journee|soiree|nuit|fete|fetes|chance|continuation|sante|reception|reussite|semaine|vacances|retraite|route|lecture|idee|reponse|nouvelle|nouvelles|fin))|femme de menage|jardinier|babysitter|secretaire|comptable|agent|serveu|caissi|livreur|coiffeu|domestique|nourrice|vigile|main d oeuvre)|\b(recrutement|recruter|embaucher|engager)\b/;
   var job = /(cherch|besoin|veux|voudrais|souhait|aimerais|recherche)\w*.{0,30}(travail|emploi|job|boulot|poste|place|stage|travailler)|\b(chomeur|chomage|sans emploi|postuler|candidat|mon cv)\b|\bje suis (une |un )?(menagere|nounou|cuisinier\w*|gardien|chauffeur|vendeu\w+|serveu\w+|jardinier|couturi\w+|secretaire|comptable|coiffeu\w+)/;
   var svc = /(panne|climatis\w*|prestation|intervention|reparation|reparer|depannage|depanner|installation|installer|nettoyage|devis|entretien|demenagement|besoin d un service|un service|plombier|electricien|peintre|macon|carrelage|climatisation|serrurier|menuisier)/;
+  /* Priorité aux consignes du gérant (Q: question => réponse) : elles passent AVANT les situations, l’expertise, le réconfort, les petites conversations et les moteurs.
+     Seule exception : « je cherche du travail / du personnel » lance le dossier, sauf si la consigne correspond exactement au message et ne demande pas déjà le nom. */
+  if (!c.flow && !c.gameA) {
+    var qa0 = kbQA(text);
+    if (qa0 && (!(R(job, n) || R(emp, n)) || (qa0.exact && !/votre nom|vous appelez/i.test(qa0.text)))) return out([qa0.text], MENU);
+  }
+  if (!c.flow) { var sf0 = sitFollow(c, text, n); if (sf0) return sf0; }
+  if (!c.flow && R(/(comment|conseil|astuce|que faut il|quels documents|quelle difference)/, n)) { var ex0 = findExpert(toks(text)); if (ex0) return expertReply(c, ex0); }
+  /* intentions (regex définies plus haut) */
   /* Moteur de réconfort (port de ShamanReconfort.kt) : la bonne personne et le bon sujet passent avant (tiers, deuil, maladie, emploi…). */
   if (!c.flow && !c.gameA && !R(job, n) && !R(emp, n) && !R(svc, n)) {
     var pk = sitFind(c, n), Zr = sit();
@@ -1939,6 +1961,7 @@ var UI = {}, CSS = [
 '.cv-pre{font-size:13.5px;color:#0F2436;opacity:.85;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
 '#sb-a .tb.cv-tb{padding:8px 12px;align-items:center}',
 '#sb-a .tb .cv-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+'.cv-numbar{font-size:16px;font-weight:700;color:#1B6F9C;padding:7px 12px;background:#F3FAFF;border-bottom:1px solid #B8DCEC;word-break:break-all;-webkit-user-select:text;user-select:text}',
 '.cv-state{font-size:12px;color:#43647F;padding:6px 12px;background:#F3FAFF;border-bottom:1px solid #B8DCEC;line-height:1.35}',
 '#sb-a .cv-msgs{display:flex;flex-direction:column;gap:6px;padding:10px 12px}',
 '.cv-b{max-width:84%;padding:8px 12px;border-radius:14px;white-space:pre-wrap;word-wrap:break-word;font-size:15px;line-height:1.35}',
@@ -2029,6 +2052,149 @@ function dosCard(bd, d, tag) {
   card.appendChild(el('div', null, txt.split('\n').slice(1).join('\n')));
   var cp = el('button', null, 'Copier'); cp.style.marginTop = '6px'; cp.onclick = function () { copy(txt, cp); }; card.appendChild(cp); bd.appendChild(card);
 }
+/* ================= Consignes : on écrit comme on parle, le système range chaque ligne au bon format dans « Instructions » ================= */
+var CONS_KEYS = [
+  ['Horaires', 'horaires?|heures? d[’\' ]?ouverture|jours? d[’\' ]?ouverture'],
+  ['Adresse', 'adresse|localisation'],
+  ['Contact', 'contacts?|t[ée]l[ée]phone|whats ?app|num[ée]ros?|e-?mail|mail'],
+  ['Tarifs', 'tarifs?|prix|frais|honoraires'],
+  ['Services', 'services?'],
+  ['Activité', 'activit[ée]s?'],
+  ['Présentation', 'pr[ée]sentation'],
+  ['Inscription', 'inscription'],
+  ['Offres', 'offres?(?: d[’\' ]emploi)?|postes? disponibles?'],
+  ['Agence', 'nom de l[’\' ]agence']
+];
+var CONS_COND = /^(?:si|quand|lorsqu(?:e|['’])|au cas o[uù]|en cas de|pour la question|question)\b\s*[:,]?\s*(.*)$/i;
+var CONS_ASK = /^(?:(?:on|quelqu['’]un|quelqu un|une? personne|la personne|le client|la cliente|un client|une cliente|un candidat|une candidate|les? gens|les clients|les candidats|l['’]utilisateur|il|elle|ils|elles|vous|tu|me|m['’]|te|nous)\s+)+(?:demand\w*|dit|disent|[ée]crit|[ée]crivent|envoie\w*|pose\w*(?: la question)?|r[ée]pond\w*|tape\w*|texte\w*|mentionne\w*|parle\w*(?: de)?)\s*(?:que|de|d['’]|si|la question|le message|le mot|le chiffre|le num[ée]ro|:)?\s*/i;
+var CONS_ANS = /(?:\s*[,;:.]\s*|\s+alors\s+|\s+tu\s+|\s+vous\s+)(?:alors\s+)?(?:tu\s+|vous\s+)?(?:r[ée]ponds?|r[ée]pondez|r[ée]pondre|r[ée]ponse|dis|dites|dire|[ée]cris|[ée]crivez|[ée]crire|envoie|envoyez|envoyer|l['’]assistant\s+(?:doit\s+)?(?:r[ée]pond\w*|dit|dire|[ée]crit|[ée]crire)|le bot\s+(?:doit\s+)?(?:r[ée]pond\w*|dit))\b\s*(?:[:\-–—]|que|ceci)?\s*/i;
+var CONS_RULE = /^(?:toujours|jamais|ne\s|n['’]|il (?:ne )?(?:faut|fallait)|[ée]vite|interdit|tu (?:dois|ne dois|peux|ne peux)|pense|pr[ée]cise|rappelle|propose|demande|pose|reste|sois|garde|utilise|vouvoie|tutoie)/i;
+function consClean(s) { return String(s || '').replace(/^[\s«"“”'’:,;\-–—]+/, '').replace(/[\s»"“”,;]+$/, '').replace(/\s+/g, ' ').trim(); }
+function consQ(s) { return consClean(String(s).replace(/=>|->|→|\|\||\?\?/g, ' ')); }
+function consAlts(q) {
+  var qs = [], re = /[«"“]([^»"”]+)[»"”]/g, m;
+  while ((m = re.exec(q))) qs.push(consQ(m[1]));
+  if (qs.length < 2) qs = q.split(/\s*[\/|;]\s*/).map(consQ);
+  qs = qs.filter(function (x) { return x; });
+  if (qs.length < 2 || qs.some(function (x) { return x.split(/\s+/).length > 10; })) return [consQ(q.replace(/^[«"“]|[»"”]$/g, ''))];
+  return qs;
+}
+function consInfo(l) {
+  var i, re, m;
+  if ((m = l.match(/^(?:(?:l[’'])?agence|notre agence|l[’']entreprise)\s+(?:s[’' ]appelle|se nomme|est)\s+(?:l[’']agence\s+)?(.+)$/i)) && /s[’' ]appelle|se nomme/i.test(l)) return { key: 'Agence', v: consClean(m[1]) };
+  for (i = 0; i < CONS_KEYS.length; i++) {
+    re = new RegExp('^(?:(?:nos|notre|vos|votre|les|le|la|l[’\'])\\s*)?(?:' + CONS_KEYS[i][1] + ')(?:\\s+(?:de|du) l[’\' ]?(?:agence|entreprise))?\\s*(?:[:=\\-–—]|=>|->|→|\\b(?:sont|est|se trouvent?|:))\\s*(.+)$', 'i');
+    if ((m = l.match(re))) return { key: CONS_KEYS[i][0], v: consClean(m[1]) };
+  }
+  if (/\b(?:ouverts?|ferm[ée]s?|ouvrons|fermons|ouvre|ferme)\b/i.test(l) && /\b(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|jours?|tous les|heures?|h\d*|midi|matin|soir)\b/i.test(l)) return { key: 'Horaires', v: consClean(l) };
+  if (/\b(?:se trouve|situ[ée]e?s?|sommes (?:à|au|en|situ)|nous trouvons)\b/i.test(l) && /\b(?:agence|bureau|nous|local)\b/i.test(l)) return { key: 'Adresse', v: consClean(l) };
+  return null;
+}
+/* texte libre → liste d’éléments { kind: 'qa'|'info'|'rule'|'todo', line, label, why, warn } */
+function consParse(text) {
+  var raw = String(text || '').split(/\r?\n/).map(function (x) { return x.replace(/^\s*(?:[-•*▪◦]|\d{1,2}[.)])\s+/, '').trim(); }).filter(function (x) { return x; });
+  var lines = [], i, l;
+  for (i = 0; i < raw.length; i++) {
+    l = raw[i];
+    /* ligne « Réponds : … » qui suit une condition sans réponse */
+    if (/^(?:r[ée]ponds?|r[ée]ponse|dis|dire|[ée]cris)\s*[:\-–—]/i.test(l) && lines.length && CONS_COND.test(lines[lines.length - 1]) && !CONS_ANS.test(lines[lines.length - 1])) { lines[lines.length - 1] += ', ' + l; continue; }
+    lines.push(l);
+  }
+  var out = [];
+  lines.forEach(function (l) {
+    var m, q, a, am, rest, inf;
+    function addQA(qq, aa, via) {
+      aa = consClean(aa).replace(/\s*\n\s*/g, ' ');
+      var alts = consAlts(qq).filter(function (x) { return x; });
+      if (!alts.length || aa.length < 2) { out.push({ kind: 'todo', src: l, label: 'À compléter', why: 'Il manque la question ou la réponse. Écrivez par exemple : Si on demande « … », réponds : …' }); return; }
+      alts.forEach(function (x) {
+        if (typeof toks === 'function' && !toks(x).length) {
+          out.push({ kind: 'todo', src: l, label: 'À compléter', why: 'La question « ' + x + ' » ne contient aucun mot précis : l’assistant ne pourrait pas la reconnaître. Ajoutez un mot clé (ex. « Vous êtes situés où à Abidjan ? »). Pour l’adresse, écrivez plutôt : Notre adresse est …' });
+          return;
+        }
+        out.push({ kind: 'qa', q: x, a: aa, line: 'Q: ' + x + ' => ' + aa, label: 'Réponse à un SMS reçu', warn: x.split(/\s+/).length > 10 ? 'Question longue : écrivez-la plus courte, comme les gens l’écrivent.' : '' });
+      });
+    }
+    if ((m = l.match(/^(?:q|question)\s*:\s*(.+?)\s*(?:=>|->|→|\|\||\?\?)\s*(.+)$/i))) return addQA(m[1], m[2]);
+    if ((m = l.match(/^consigne\s*:\s*(.+)$/i))) return out.push({ kind: 'rule', line: 'Consigne: ' + consClean(m[1]), label: 'Consigne générale' });
+    if ((m = l.match(/^(.{1,160}?)\s*(?:=>|->|→)\s*(.+)$/))) return addQA(m[1].replace(CONS_COND, '$1').replace(CONS_ASK, ''), m[2]);
+    if ((m = l.match(CONS_COND))) {
+      rest = m[1]; am = rest.match(CONS_ANS);
+      if (am) { q = rest.slice(0, am.index).replace(CONS_ASK, ''); a = rest.slice(am.index + am[0].length); return addQA(q, a); }
+      return out.push({ kind: 'todo', src: l, label: 'À compléter', why: 'Il manque la réponse. Ajoutez « , réponds : … » à la fin de la phrase.' });
+    }
+    if ((inf = consInfo(l))) { if (inf.v.length < 2) return out.push({ kind: 'todo', src: l, label: 'À compléter', why: 'Il manque la valeur de « ' + inf.key + ' ».' }); return out.push({ kind: 'info', key: inf.key, v: inf.v, line: inf.key + ': ' + inf.v, label: 'Information de l’agence' }); }
+    if ((m = l.match(/^([^:]{2,30}):\s*(.+)$/)) && !/\?/.test(m[1]) && !CONS_RULE.test(m[1])) return out.push({ kind: 'info', key: consClean(m[1]), v: consClean(m[2]), line: consClean(m[1]) + ': ' + consClean(m[2]), label: 'Information de l’agence' });
+    if (CONS_RULE.test(l)) return out.push({ kind: 'rule', line: 'Consigne: ' + consClean(l), label: 'Consigne générale' });
+    if (/\?\s*$/.test(l)) return out.push({ kind: 'todo', src: l, label: 'À compléter', why: 'Question sans réponse. Écrivez : Si on demande « … », réponds : …' });
+    out.push({ kind: 'rule', line: 'Consigne: ' + consClean(l), label: 'Consigne générale' });
+  });
+  return out;
+}
+
+/* Range les éléments dans « Instructions » : réponses types (Q: …), informations (Titre: …) et consignes générales */
+function consApply(items) {
+  var n = 0;
+  items.forEach(function (it) {
+    if (it.kind === 'qa') { if (teach(it.q, it.a)) n++; }
+    else if (it.kind === 'info') { if (setInfo(it.key, it.v)) n++; }
+    else if (it.kind === 'rule') {
+      var present = S.instr.split(/\r?\n/).some(function (x) { return norm(x) === norm(it.line); });
+      if (!present) { S.instr = S.instr.replace(/\s*$/, '') + '\n' + it.line + '\n'; n++; }
+    }
+  });
+  save(); syncNative();
+  try { if (UI && UI.title) UI.title.textContent = agency(); } catch (e) {}
+  return n;
+}
+function consView(bd) {
+  var inp = 'width:100%;box-sizing:border-box;padding:9px;border:1.5px solid #B8DCEC;border-radius:8px;font-size:15px;margin:4px 0', items = [];
+  bd.appendChild(el('p', null, 'Écrivez vos instructions comme vous parlez, une par ligne. Le système les range lui-même, au bon format, dans l’onglet « Instructions » : vous n’avez rien à formater.'));
+  bd.appendChild(el('div', 'sb-d', 'Exemples :\n• Si on demande vos horaires, réponds : Nous recevons tous les jours de 10h à midi.\n• Si on dit bonjour / salut / coucou, réponds : Bonjour, bienvenue. Comment puis-je vous aider ?\n• Si on envoie « c’est combien » ou « quel est le prix », réponds : Le responsable vous donne les tarifs par appel.\n• Notre adresse est : Abidjan, Yopougon, Académie.\n• Ne jamais donner de prix par SMS.'));
+  var ta = el('textarea'); ta.placeholder = 'Écrivez ici vos instructions…'; ta.style.cssText = inp + ';height:150px';
+  var go = el('button', 'pri', 'Analyser mes instructions'); go.style.marginTop = '6px';
+  var res = el('div'); res.style.marginTop = '10px';
+  var info = el('div', 'sb-d'); info.style.display = 'none';
+  function paint() {
+    res.textContent = ''; info.style.display = 'none';
+    if (!items.length) return;
+    res.appendChild(el('p', null, 'Voici comment le système a compris vos instructions. Retirez (✕) ce qui est faux, puis validez.'));
+    items.forEach(function (it, i) {
+      var c = el('div', 'sb-d'), b = el('b', null, (it.kind === 'todo' ? '⚠ ' : '✔ ') + it.label);
+      c.appendChild(b); c.appendChild(el('div', null, it.kind === 'todo' ? it.src : it.line));
+      if (it.kind === 'todo') c.appendChild(el('div', null, it.why)); else if (it.warn) c.appendChild(el('div', null, '⚠ ' + it.warn));
+      if (it.kind === 'rule') c.appendChild(el('div', null, 'Règle générale : suivie surtout quand les clés IA (onglet Cours détaillés) sont enregistrées. Pour une réponse précise à un SMS, écrivez : Si on demande … , réponds : …'));
+      var x = el('button', null, '✕ Retirer'); x.style.marginTop = '6px'; x.onclick = function () { items.splice(i, 1); paint(); }; c.appendChild(x);
+      res.appendChild(c);
+    });
+    var ok = items.filter(function (it) { return it.kind !== 'todo'; }).length;
+    if (ok) {
+      var v = el('button', 'pri', '✅ Ranger dans Instructions (' + ok + ')');
+      v.onclick = function () {
+        var n = consApply(items.filter(function (it) { return it.kind !== 'todo'; }));
+        var left = items.filter(function (it) { return it.kind === 'todo'; });
+        items = left; ta.value = left.map(function (it) { return it.src; }).join('\n'); paint();
+        info.style.display = 'block'; info.textContent = '✔ ' + n + ' ligne(s) rangée(s) dans l’onglet « Instructions » et prises en compte tout de suite par l’assistant.' + (left.length ? ' Les lignes à compléter restent dans la zone d’écriture.' : '');
+      };
+      res.appendChild(v);
+      var vi = el('button', null, 'Voir l’onglet Instructions'); vi.style.marginLeft = '6px'; vi.onclick = function () { adminView('instr'); }; res.appendChild(vi);
+    }
+  }
+  go.onclick = function () { items = consParse(ta.value); if (!items.length) { res.textContent = ''; res.appendChild(el('p', null, 'Rien à analyser : écrivez d’abord vos instructions.')); return; } paint(); };
+  bd.appendChild(ta); bd.appendChild(go); bd.appendChild(res); bd.appendChild(info);
+  /* test immédiat : écrire un SMS reçu et voir la réponse exacte de l’assistant */
+  bd.appendChild(el('p', null, 'Tester : écrivez un SMS reçu et vérifiez la réponse.'));
+  var ti = el('input'); ti.type = 'text'; ti.placeholder = 'Ex. : vous êtes où ?'; ti.style.cssText = inp;
+  var tb = el('button', null, 'Tester la réponse'), to = el('div', 'sb-d'); tb.style.marginTop = '6px'; to.style.marginTop = '8px';
+  tb.onclick = function () {
+    var X = nat(), t = ti.value.trim(); if (!t) return;
+    if (X && typeof X.botTest === 'function') { try { to.textContent = X.botTest(t) || '(aucune réponse)'; } catch (e) { to.textContent = 'Erreur de test'; } return; }
+    delete S.convs['c:cons-test'];
+    reply('cons-test', t).then(function (x) { to.textContent = x.m.join('\n') || '(aucune réponse)'; });
+  };
+  bd.appendChild(ti); bd.appendChild(tb); bd.appendChild(to);
+}
+
 function adminView(tab) {
   if (EMB && tab === 'conv') {
     Object.keys(UI.seg).forEach(function (k) { UI.seg[k].b.className = (k === tab) ? 'on' : ''; });
@@ -2038,7 +2204,7 @@ function adminView(tab) {
   var A = UI.a; A.textContent = ''; A.classList.add('on');
   var tb = el('div', 'tb'), bd = el('div', 'bd'), nd = natJSON('botDossiers'), unk = unknownList();
   if (EMB) Object.keys(UI.seg).forEach(function (k) { UI.seg[k].b.className = (k === tab) ? 'on' : ''; });
-  [['instr', 'Instructions'], ['dos', 'Dossiers (' + (S.dossiers.length + nd.length) + ')'], ['learn', 'À apprendre (' + learnCount() + ')'], ['brain', 'Cours détaillés']].forEach(function (t) {
+  [['instr', 'Instructions'], ['cons', '✍ Consignes'], ['dos', 'Dossiers (' + (S.dossiers.length + nd.length) + ')'], ['learn', 'À apprendre (' + learnCount() + ')'], ['brain', 'Cours détaillés']].forEach(function (t) {
     var b = el('button', tab === t[0] ? 'on' : '', t[1]); b.onclick = function () { adminView(t[0]); }; tb.appendChild(b);
   });
   var cl = el('button', null, 'Fermer'); cl.style.marginLeft = 'auto'; cl.onclick = function () { A.classList.remove('on'); }; tb.appendChild(cl);
@@ -2073,6 +2239,8 @@ function adminView(tab) {
       tbn.onclick = function () { try { tout.textContent = X.botTest(ti.value) || '(aucune réponse)'; } catch (e) { tout.textContent = 'Erreur de test'; } };
       bd.appendChild(ti); bd.appendChild(tbn); bd.appendChild(tout);
     }
+  } else if (tab === 'cons') {
+    consView(bd);
   } else if (tab === 'dos') {
     if (!S.dossiers.length && !nd.length) bd.appendChild(el('p', null, 'Aucun dossier pour le moment.'));
     S.dossiers.forEach(function (d) { dosCard(bd, d, ''); });
@@ -2211,7 +2379,7 @@ function greetInto(c) {
 function buildEmbed(host) {
   EMB = true; UI.title = el('b'); UI.seg = {};
   var root = el('div', 'sb-emb'), seg = el('div', 'sb-seg'), box = el('div', 'sb-box');
-  var segs = [['chat', '💬 Discussion'], ['instr', '⚙ Instructions'], ['dos', '📁 Dossiers'], ['learn', '🧠 À apprendre'], ['brain', '🎓 Cours détaillés']];
+  var segs = [['chat', '💬 Discussion'], ['instr', '⚙ Instructions'], ['cons', '✍ Consignes'], ['dos', '📁 Dossiers'], ['learn', '🧠 À apprendre'], ['brain', '🎓 Cours détaillés']];
   if (natConv()) segs.unshift(['conv', '📨 Conversations']);
   segs.forEach(function (t) {
     var b = el('button', t[0] === 'chat' ? 'on' : '', t[1]); b.setAttribute('data-v', t[0]); b.onclick = function () { showView(t[0]); }; seg.appendChild(b); UI.seg[t[0]] = { b: b };
@@ -2316,6 +2484,7 @@ function showThread(tail) {
   };
   var lb = el('button', null, '🧠'); lb.setAttribute('aria-label', 'Choisir des SMS à envoyer vers À apprendre'); lb.onclick = toggleSel;
   tb.appendChild(back); tb.appendChild(CV.title); tb.appendChild(CV.tg); tb.appendChild(lb); tb.appendChild(del); A.appendChild(tb);
+  CV.numbar = el('div', 'cv-numbar'); CV.numbar.textContent = '📞 ' + tail; A.appendChild(CV.numbar);
   CV.state = el('div', 'cv-state'); A.appendChild(CV.state);
   CV.msgs = el('div', 'bd cv-msgs'); A.appendChild(CV.msgs);
   CV.err = el('div', 'cv-err'); A.appendChild(CV.err);
@@ -2345,6 +2514,8 @@ function paintThread(force) {
   var near = force || (box.scrollHeight - box.scrollTop - box.clientHeight < 80);
   CV.title.textContent = th.name || th.num || CV.tail;
   CV.num = th.num || CV.num;
+  /* le numéro complet reste toujours visible (le titre de la barre du haut est coupé quand il est long) */
+  if (CV.numbar) CV.numbar.textContent = '📞 ' + (th.name && (th.num || CV.num) ? th.name + ' · ' : '') + (th.num || CV.num || CV.tail);
   paintBlocked();
   CV.bot = th.bot !== false; paintToggle();
   box.textContent = '';
