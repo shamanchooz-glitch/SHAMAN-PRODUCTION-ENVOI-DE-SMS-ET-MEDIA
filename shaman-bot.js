@@ -761,7 +761,7 @@ function extract(text) {
   var n = N(text), o = {}, m, found = [];
   var tel = phoneOf(text); if (tel) o.tel = tel;
   if ((m = String(text).match(/(?:je m ?['\u2019]?appelle|mon nom (?:est|c['\u2019 ]?est)|moi c['\u2019 ]?est|appelez[- ]moi|mon nom\s*:)\s+([A-Za-z\u00C0-\u00FF'\u2019 -]{2,40})/i))) { var nmv = cap(m[1].replace(/\s+(?:et|je|qui)\b.*|\s+j['\u2019].*/i, '').trim()); if (nmv) o.nom = nmv; }
-  if ((m = n.match(/\bj ai (\d{2}) ans\b(?! (?:d|de) (?:experience|expe|metier|service|travail|anciennete|pratique))/))) { o.age = +m[1]; n = n.replace(m[0], ' '); }
+  if ((m = ageDit(n, new Date(), false))) { o.age = m.v; n = n.replace(m.m, ' '); }
   JOBS.forEach(function (j) { if (j[1].test(n) && found.length < 2) found.push(j[0]); });
   if (found.length) o.metier = found.join(', ');
   if ((m = n.match(VRE))) o.commune = cap(m[1]);
@@ -809,15 +809,89 @@ function slotDef(c, k) { var s = FLOWS[c.flow].slots; for (var i = 0; i < s.leng
 function nextSlot(c) { var s = FLOWS[c.flow].slots; for (var i = 0; i < s.length; i++) if (c.slots[s[i].k] === undefined) return s[i]; return null; }
 function inFlow(c, k) { return !!slotDef(c, k); }
 
-/* Âge donné par la personne : « 25 », « 25 ans », « j’ai 25 ans », « vingt cinq ans » → nombre (5 à 99), sinon undefined (on redemande) */
+/* Âge donné par la personne : « 26 », « 26 ans », « 26ans », « j’ai 26 ans », « vingt six ans », « soixante dix ans »,
+ * « née en 2000 », « je suis né dans l’année 2000 », « 2000 », « née le 12/03/2000 », « né le 12 mars 98 »… → nombre (5 à 99), sinon undefined (on redemande).
+ * L'année de naissance est comparée à l'année du jour ; avec le jour et le mois, l'âge est exact. */
 var AGEW = { 'dix sept': 17, 'dix huit': 18, 'dix neuf': 19, onze: 11, douze: 12, treize: 13, quatorze: 14, quinze: 15, seize: 16, dix: 10 };
 var AGET = { vingt: 20, trente: 30, quarante: 40, cinquante: 50, soixante: 60 };
 var AGEU = { un: 1, une: 1, deux: 2, trois: 3, quatre: 4, cinq: 5, six: 6, sept: 7, huit: 8, neuf: 9 };
-function ageOf(n) {
-  var re = /\b(\d{1,2})\b/g, mm, w, m2;
-  while ((mm = re.exec(n))) { if (+mm[1] >= 5 && +mm[1] <= 99) return +mm[1]; }
+var AGE_MOIS = 'janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre|janv|fevr|avr|juil|sept|oct|nov|dec';
+var AGE_MOISN = { janvier: 1, janv: 1, fevrier: 2, fevr: 2, mars: 3, avril: 4, avr: 4, mai: 5, juin: 6, juillet: 7, juil: 7, aout: 8, septembre: 9, sept: 9, octobre: 10, oct: 10, novembre: 11, nov: 11, decembre: 12, dec: 12 };
+var AGE_XP = '(?: (?:d|de|du|en) (?:experience|expe|metier|service|travail|anciennete|pratique|vie|carriere|etudes?|mariage|couple))';
+var AGE_NAIS = /\b(?:suis|sui|etais|jsuis) nee?s?\b|\bnee?s?\s+(?:en|le|dans|vers|au|l|la)\b|\bnaiss\w*|\bnaitre\b/;
+var AGE_REMPLI = /\b(?:en|l|la|le|les|au|annee|an|dans|de|du|d|c|est|je|suis|moi|ma|mon|nee?s?|naissance|date|vers|et|environ|madame|monsieur|svp|s|il|vous|plait|merci|bonjour|bonsoir|voila|oui|ok)\b/g;
+function ageSepare(n) { return String(n).replace(/(\d)([a-z])/g, '$1 $2').replace(/([a-z])(\d)/g, '$1 $2'); }
+function ageOk(a) { return a >= 5 && a <= 99; }
+function ageSeul(n, tok) { return n.replace(tok, ' ').replace(AGE_REMPLI, ' ').replace(/\s+/g, '') === ''; }
+function ageAu(y, mo, d, now) {
+  var a = now.getFullYear() - y;
+  if (mo && (now.getMonth() + 1 < mo || (now.getMonth() + 1 === mo && now.getDate() < d))) a--;
+  return a;
+}
+/* Naissance : date complète, année (4 chiffres ou en lettres) ou année sur 2 chiffres. strict = il faut un mot de naissance. */
+function ageNaissance(n, now, strict) {
+  var cy = now.getFullYear(), nais = AGE_NAIS.test(n), m, y, mo, d, a, yy, w;
+  if (strict && !nais) return null;
+  m = n.match(new RegExp('\\b(\\d{1,2})(?: er)? (\\d{1,2}|' + AGE_MOIS + ') (19\\d{2}|20\\d{2})\\b'));
+  if (m && (nais || ageSeul(n, m[0]))) {
+    d = +m[1]; mo = AGE_MOISN[m[2]] || +m[2]; y = +m[3];
+    if (d >= 1 && d <= 31 && mo >= 1 && mo <= 12) { a = ageAu(y, mo, d, now); if (ageOk(a)) return { v: a, m: m[0] }; }
+  }
+  m = n.match(/\b(19[2-9]\d|20[0-2]\d)\b/);
+  if (m && (nais || ageSeul(n, m[0]))) { a = cy - +m[1]; if (ageOk(a)) return { v: a, m: m[0] }; }
+  m = n.match(/\bdeux mille(?: (un|une|deux|trois|quatre|cinq|six|sept|huit|neuf|dix sept|dix huit|dix neuf|dix|onze|douze|treize|quatorze|quinze|seize))?\b/);
+  if (m && (nais || ageSeul(n, m[0]))) {
+    w = m[1] ? (AGEW[m[1]] || AGEU[m[1]]) : 0; a = cy - (2000 + w);
+    if (ageOk(a)) return { v: a, m: m[0] };
+  }
+  if (nais) {
+    m = n.match(new RegExp('\\b(\\d{1,2})(?: er)? (\\d{1,2}|' + AGE_MOIS + ') (\\d{2})\\b(?! (?:ans?|' + AGE_MOIS + ')\\b)'));
+    if (m) {
+      d = +m[1]; mo = AGE_MOISN[m[2]] || +m[2]; yy = +m[3]; y = yy <= cy % 100 ? 2000 + yy : 1900 + yy;
+      if (d >= 1 && d <= 31 && mo >= 1 && mo <= 12) { a = ageAu(y, mo, d, now); if (ageOk(a)) return { v: a, m: m[0] }; }
+    }
+    m = n.match(new RegExp('\\bnee?s?\\s+(?:en |vers |dans l annee |l annee |en l an |en annee )?(\\d{2})\\b(?! (?:ans?|' + AGE_MOIS + ')\\b)'));
+    if (m) { yy = +m[1]; y = yy <= cy % 100 ? 2000 + yy : 1900 + yy; a = cy - y; if (ageOk(a)) return { v: a, m: m[1] }; }
+  }
+  return null;
+}
+/* Âge dit clairement (message libre ou réponse) : « j’ai 26 ans », « j’ai 26ans », « née en 2000 »… → {v, m} ou null. */
+function ageDit(n, now, large) {
+  var m, a;
+  n = ageSepare(n);
+  m = n.match(new RegExp('\\bj ai (?:(?:environ|presque|pres de|plus de|bientot|deja|tout juste|a peu pres) )?(\\d{1,2}) ans?\\b(?!' + AGE_XP + ')'));
+  if (m && ageOk(+m[1])) return { v: +m[1], m: m[0] };
+  if (large) {
+    m = n.match(/\bage(?: (?:est|de|c est|actuel|exact))* (\d{1,2})\b/);
+    if (m && ageOk(+m[1])) return { v: +m[1], m: m[0] };
+  }
+  a = ageNaissance(n, now, !large);
+  return a;
+}
+function ageOf(n, now) {
+  var a, re, mm, v, after, before, m2, w, k;
+  now = now || new Date();
+  a = ageDit(n, now, true);
+  if (a) return a.v;
+  n = ageSepare(n);
+  re = /\b(\d{1,2}) ans?\b/g;
+  while ((mm = re.exec(n))) {
+    v = +mm[1]; before = n.slice(0, mm.index); after = n.slice(re.lastIndex);
+    if (ageOk(v) && !/\b(?:depuis|pendant|durant|apres|avant|il y a)(?: (?!ans?\b)\w+){0,2} $/.test(before) && !new RegExp('^' + AGE_XP).test(after)) return v;
+  }
+  if (new RegExp('\\b(?:janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre)\\b').test(n)) return undefined;
+  re = /\b(\d{1,2})\b/g;
+  while ((mm = re.exec(n))) {
+    v = +mm[1]; after = n.slice(re.lastIndex);
+    if (ageOk(v) && !/^ (?:mois|jours?|semaines?|enfants?|fcfa|francs?|f|km|h|heures?|personnes?|annees?|fois|euros?|ans?)\b/.test(after)) return v;
+  }
+  m2 = n.match(/\bquatre vingts?(?: (un|une|deux|trois|quatre|cinq|six|sept|huit|neuf|dix sept|dix huit|dix neuf|dix|onze|douze|treize|quatorze|quinze|seize))?\b/);
+  if (m2) return 80 + (m2[1] ? (AGEW[m2[1]] || AGEU[m2[1]]) : 0);
+  m2 = n.match(/\bsoixante(?: et)? (dix sept|dix huit|dix neuf|dix|onze|douze|treize|quatorze|quinze|seize)\b/);
+  if (m2) return 60 + AGEW[m2[1]];
+  m2 = n.match(/\b(vingt|trente|quarante|cinquante|soixante)(?: et)?(?: (un|une|deux|trois|quatre|cinq|six|sept|huit|neuf))?\b/);
+  if (m2) return AGET[m2[1]] + (m2[2] ? AGEU[m2[2]] : 0);
   for (w in AGEW) if (new RegExp('\\b' + w + '\\b').test(n)) return AGEW[w];
-  if ((m2 = n.match(/\b(vingt|trente|quarante|cinquante|soixante)(?: et)?(?: (un|une|deux|trois|quatre|cinq|six|sept|huit|neuf))?\b/))) return AGET[m2[1]] + (m2[2] ? AGEU[m2[2]] : 0);
   return undefined;
 }
 function showVal(s, v) { if (v === true) return 'Oui'; if (s.k === 'age' && typeof v === 'number') return v + ' ans'; return v; }
@@ -1052,6 +1126,7 @@ function learn(c, text) {
   var k = (c.known = c.known || {}), n = N(text), m, x, ex = extract(text);
   if (ex.nom) k.nom = ex.nom;
   if ((m = n.match(/\bj ai (\d{1,2}) ans\b/))) c.kid = +m[1] < 14;
+  else if ((m = ageDit(n, new Date(), false))) c.kid = m.v < 14;
   else if (R(/\bje suis (en )?(cp|ce1|ce2|cm1|cm2|primaire)\b|\bje suis un enfant\b/, n)) c.kid = true;
   if ((m = n.match(/\bj aime (?:bien |beaucoup |vraiment )?(?:le |la |les |l |un |une |des )?([a-z ]{3,30})/))) {
     x = m[1].split(/ (?:et|mais|parce|car|quand|surtout)\b/)[0].trim().split(' ').slice(0, 3).join(' ');
