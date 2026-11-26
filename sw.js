@@ -1,4 +1,4 @@
-const CACHE = 'shaman-production-v62';
+const CACHE = 'shaman-production-v63';
 // Everything this app needs is local — no CDN dependency at all — so a
 // full precache at install time is enough to make it open and work
 // completely offline immediately after installation.

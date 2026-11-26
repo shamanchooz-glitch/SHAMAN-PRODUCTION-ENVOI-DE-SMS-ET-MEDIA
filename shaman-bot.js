@@ -2060,6 +2060,9 @@ var UI = {}, CSS = [
 '.sb-eh .sb-x.on{background:rgba(255,255,255,.22)}',
 '.sb-eh .sb-xx{display:none;font-size:24px}',
 '.sb-emb .sb-b.bot{cursor:pointer}',
+'.sb-emb .sb-b.me{cursor:pointer}',
+'.cv-b[role=button]{cursor:pointer}',
+'.sb-b.sb-spk,.cv-b.sb-spk{box-shadow:0 0 0 2px #F0528C}',
 '.sb-box.sb-full{position:fixed;inset:0;z-index:2147483000;height:auto;min-height:0;max-height:none;border:0;border-radius:0}',
 '.sb-box.sb-full .sb-eh{padding-top:calc(10px + env(safe-area-inset-top,0px))}',
 '.sb-box.sb-full .sb-xx{display:inline-block}',
@@ -2094,9 +2097,10 @@ function build() {
   t.addEventListener('mousedown', function () { tm = setTimeout(function () { ui('admin'); }, 1000); });
   ['mouseup', 'mouseleave'].forEach(function (ev) { t.addEventListener(ev, function () { clearTimeout(tm); }); });
 }
-function bubble(txt, me) { var b = el('div', 'sb-b ' + (me ? 'me' : 'bot'), txt); if (!me) vBind(b, txt); UI.m.appendChild(b); UI.m.scrollTop = UI.m.scrollHeight; }
+function bubble(txt, me) { var b = el('div', 'sb-b ' + (me ? 'me' : 'bot'), txt); vBind(b, txt); UI.m.appendChild(b); UI.m.scrollTop = UI.m.scrollHeight; }
 /* ---- Voix : l’assistant lit à voix haute ses réponses (voix Android du téléphone ; à défaut, voix du navigateur) ---- */
-function vBind(b, t) { if (!EMB) return; b.setAttribute('role', 'button'); b.title = 'Toucher pour écouter'; b.onclick = function () { voxSay(t, false); }; }
+function spk(b) { b.classList.add('sb-spk'); if (typeof setTimeout === 'function') setTimeout(function () { b.classList.remove('sb-spk'); }, 900); }
+function vBind(b, t) { if (!EMB) return; b.setAttribute('role', 'button'); b.title = 'Toucher pour écouter'; b.onclick = function () { spk(b); voxSay(t, false); }; }
 function voxMode() {
   var X = nat(); if (X && typeof X.ttsSpeak === 'function') return 'native';
   try { if (W.speechSynthesis && typeof W.SpeechSynthesisUtterance === 'function') return 'web'; } catch (e) {}
@@ -2564,6 +2568,10 @@ function shortT(t) {
   if (k === dayKey(Date.now() - 86400000)) return 'Hier';
   return two(d.getDate()) + '/' + two(d.getMonth() + 1);
 }
+function cvBind(b, t) {
+  b.setAttribute('role', 'button'); b.title = 'Toucher pour écouter';
+  b.onclick = function () { spk(b); if (!voxSay(t, false)) flash('La voix n’est pas disponible sur ce téléphone. Vérifiez les réglages « Synthèse vocale » d’Android.'); };
+}
 function convStop() { if (CV.timer) { clearInterval(CV.timer); CV.timer = null; } if (UI.box) UI.box.classList.remove('sb-tall'); }
 function convStart() { convStop(); if (UI.box) UI.box.classList.add('sb-tall'); CV.timer = setInterval(convTick, 3000); }
 function convTick() {
@@ -2578,6 +2586,7 @@ function convRoot(A) {
   convStart(); showList();
 }
 function showList() {
+  voxStop();
   var A = CV.A; A.textContent = ''; CV.tail = null; CV.sig = '';
   CV.body = el('div', 'bd'); A.appendChild(CV.body);
   paintList(true);
@@ -2611,6 +2620,7 @@ function paintList(force) {
   bd.scrollTop = keep;
 }
 function showThread(tail) {
+  voxStop(); CV.seen = null;
   var A = CV.A; A.textContent = ''; CV.tail = tail; CV.sig = ''; CV.busy = false; CV.sel = {}; CV.selMode = false; CV.num = ''; CV.forceBlk = false;
   var tb = el('div', 'tb cv-tb'), back = el('button', null, '← Retour');
   back.onclick = function () { showList(); refreshSeg(); };
@@ -2659,17 +2669,21 @@ function paintThread(force) {
   paintBlocked();
   CV.bot = th.bot !== false; paintToggle();
   box.textContent = '';
-  var day = '';
+  var day = '', cnt = {}, fresh = [];
   ms.forEach(function (m) {
+    if (m.d !== 'sys') { var k = m.t + '|' + m.d + '|' + m.x; cnt[k] = (cnt[k] || 0) + 1; if (CV.seen && cnt[k] > (CV.seen[k] || 0) && m.d !== 'me') fresh.push(m.x); }
     var dk = dayKey(m.t);
     if (dk !== day) { day = dk; box.appendChild(el('div', 'cv-day', dayLabel(m.t))); }
     if (m.d === 'sys') { box.appendChild(el('div', 'cv-sys', m.x + ' • ' + hhmm(m.t))); return; }
     var b = el('div', 'cv-b cv-' + m.d, m.x);
     if (CV.selMode && m.d === 'in') { var id = m.t + '|' + m.x; b.className += ' cv-pick' + (CV.sel[id] ? ' cv-sel' : ''); b.onclick = function () { pickMsg(b, id, m.x); }; }
+    else cvBind(b, m.x);
     var tag = m.d === 'bot' ? '🤖 Chatbot' : m.d === 'auto' ? '⚙️ Réponse automatique' : m.d === 'me' ? '✍️ Vous' : '';
     b.appendChild(el('span', 'cv-meta', (tag ? tag + ' • ' : '') + hhmm(m.t)));
     box.appendChild(b);
   });
+  CV.seen = cnt;
+  if (fresh.length && S.voice && !D.hidden && !CV.selMode) fresh.slice(-5).forEach(function (x) { voxSay(x, true); });
   if (near) box.scrollTop = box.scrollHeight;
 }
 /* choisir un ou plusieurs SMS reçus et les envoyer vers « À apprendre » */
