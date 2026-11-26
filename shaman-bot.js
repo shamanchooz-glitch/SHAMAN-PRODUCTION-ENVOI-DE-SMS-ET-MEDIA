@@ -2064,6 +2064,8 @@ var UI = {}, CSS = [
 '.sb-box.sb-full .sb-eh{padding-top:calc(10px + env(safe-area-inset-top,0px))}',
 '.sb-box.sb-full .sb-xx{display:inline-block}',
 '.sb-box.sb-full .sb-fx{display:none}',
+'.sb-main{position:relative;flex:1 1 0;min-height:0;display:flex;flex-direction:column}',
+'.sb-main #sb-a .tb{padding:8px 12px}',
 '@media(prefers-reduced-motion:no-preference){.sb-b{animation:sbin .18s ease-out}@keyframes sbin{from{opacity:0;transform:translateY(4px)}}}'
 ].join('');
 
@@ -2524,7 +2526,8 @@ function buildEmbed(host) {
   var f = el('div', 'sb-i'); UI.in = el('input'); UI.in.type = 'text'; UI.in.placeholder = 'Écrivez votre message…'; UI.in.setAttribute('enterkeyhint', 'send');
   var sd = el('button', null, '➤'); sd.setAttribute('aria-label', 'Envoyer'); f.appendChild(UI.in); f.appendChild(sd);
   UI.a = el('div'); UI.a.id = 'sb-a';
-  box.appendChild(hd); box.appendChild(UI.m); box.appendChild(UI.c); box.appendChild(f); box.appendChild(UI.a);
+  var main = el('div', 'sb-main'); main.appendChild(UI.m); main.appendChild(UI.c); main.appendChild(f); main.appendChild(UI.a);
+  box.appendChild(hd); box.appendChild(main);
   UI.box = box;
   root.appendChild(seg); root.appendChild(box); host.appendChild(root);
   var go = function () { var v = UI.in.value.trim(); if (v) { UI.in.value = ''; say(v); } };
