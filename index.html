@@ -1298,10 +1298,11 @@ function stripBlockedFromBase(base){
   if(!base.numbers.some(n => isBlocked(n))) return 0;
   let removed = 0;
   const kept = [];
+  const cur0 = base.cursor; // curseur d'origine : sinon, avec plusieurs bloqués avant le curseur, il reculait trop peu et sautait un destinataire
   base.numbers.forEach((n, i) => {
     if(isBlocked(n)){
       removed++;
-      if(i < base.cursor) base.cursor -= 1;
+      if(i < cur0) base.cursor -= 1;
       if(!base.deletedNumbers) base.deletedNumbers = [];
       base.deletedNumbers.push(n);
     } else {
@@ -1313,6 +1314,21 @@ function stripBlockedFromBase(base){
   base.updatedAt = Date.now();
   return removed;
 }
+// Balayage global : retire de TOUTES les bases tout numéro bloqué, quel que soit son format
+// (+225…, 0748…, 00225…, espaces, tirets, chiffres arabes…). Appelé après chaque synchro,
+// au démarrage et après un import, pour qu'un numéro bloqué ne reste jamais dans une base.
+// Ne touche à rien (ni updatedAt, ni curseur) quand il n'y a aucun numéro bloqué à retirer.
+// Renvoie le nombre total de numéros retirés.
+function sweepBlockedFromAllBases(){
+  let total = 0;
+  try{
+    blkTouch();
+    (db.phoneBases || []).forEach(b => {
+      if(b && Array.isArray(b.numbers)) total += stripBlockedFromBase(b);
+    });
+  }catch(e){ try{ console.warn('Balayage des bloqués échoué :', e); }catch(_){} }
+  return total;
+}
 // Nettoyage léger : au-delà de 6 mois, une tombstone n'a plus d'utilité
 // (tous les téléphones ont eu largement le temps de synchroniser la
 // suppression), donc on l'oublie pour ne pas alourdir les données indéfiniment.
@@ -1321,6 +1337,10 @@ function stripBlockedFromBase(base){
   Object.values(db.tombstones).forEach(map => {
     Object.keys(map).forEach(id => { if(map[id] < cutoff) delete map[id]; });
   });
+})();
+// Balayage au démarrage : les bases sont nettoyées dès l'ouverture de l'app (la synchro enverra le résultat au cloud).
+(function sweepBlockedAtStartup(){
+  try{ if(sweepBlockedFromAllBases() > 0) localStorage.setItem(DB_KEY, JSON.stringify(db)); }catch(e){}
 })();
 
 /* ================= SYNCHRONISATION MULTI-TÉLÉPHONES =================
@@ -1635,6 +1655,10 @@ async function syncNow(code, opts){
     // 2) Fusion locale.
     const before = JSON.stringify(db);
     db = mergeDb(db, remote);
+    // La fusion peut remettre dans une base un numéro bloqué (écrit autrement par l'autre téléphone) :
+    // on le retire tout de suite, avant de sauvegarder et de renvoyer les bases au cloud.
+    blkTouch();
+    sweepBlockedFromAllBases();
     const changed = JSON.stringify(db) !== before;
     localStorage.setItem(DB_KEY, JSON.stringify(db));
     _firstSyncDone = true;
@@ -1992,6 +2016,7 @@ document.getElementById('importFile').addEventListener('change', (e) => {
           importedBasesCount++;
           importedNumbersCount += (b.numbers || []).length;
         });
+        sweepBlockedFromAllBases();
         saveDB();
         refreshGroupSelect(); refreshGroupChips(); renderContactList();
         renderBasesList(); refreshBaseSendSelect(); renderCurrentBaseBatch();
@@ -2072,7 +2097,7 @@ smsBody.addEventListener('input', () => {
    sans ouvrir l'appli SMS, avec choix automatique de la SIM. */
 const NATIVE = !!window.ShamanNative;
 /* Version affichée : celle de l'APK installé (versionName) ; hors APK (page web), version de ces fichiers. */
-const APP_VERSION = (function(){ try{ const v = window.ShamanNative && ShamanNative.appVersion && ShamanNative.appVersion(); if(v) return String(v); }catch(e){} return '1.42'; })();
+const APP_VERSION = (function(){ try{ const v = window.ShamanNative && ShamanNative.appVersion && ShamanNative.appVersion(); if(v) return String(v); }catch(e){} return '1.43'; })();
 const nativeCbs = {};
 window.onShamanSms = function(json){
   try{ const e = JSON.parse(json); const cb = nativeCbs[e.id]; if(cb) cb(e); if(e.type === 'done') delete nativeCbs[e.id]; }catch(err){}
